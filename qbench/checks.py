@@ -67,7 +67,7 @@ CHANGE = {
     "G3": ("Ворота к улице", ("change", "inference"), 1.5),
     "G4": ("Дверь гараж→дом", ("change", "spatial"), 1.0),
     "G5": ("Окна не в гараж", ("change", "inference"), 1.5),
-    "G6": ("Пандус не задет", ("change", "spatial"), 1.0),
+    "G6": ("Пандус и подъезд к воротам", ("change", "spatial", "inference"), 1.5),
     "G7": ("Без регрессий", ("change",), 2.0),
     "G8": ("Сохранены объекты", ("change", "planning"), 1.0),
 }
@@ -715,8 +715,20 @@ def run_change(pr: ParseResult, prev_scene: Scene | None, prev_base: list[CheckR
     gbox = Obj("_g", "box", "other", [(C.GX0 + C.GX1) / 2, (C.GY0 + C.GY1) / 2, C.GARAGE_ROOF_TOP / 2],
                [C.GX1 - C.GX0 - 0.02, C.GY1 - C.GY0 - 0.02, C.GARAGE_ROOF_TOP])
     hit = [o for o in sc.objects if o.tag in ("ramp", "landing") and _aabb_overlap(o, gbox)]
-    add("G6", 0.0 if hit else 1.0, not hit, "пандус не пересекается с гаражом" if not hit else
-        f"пандус/площадка пересекает гараж: {', '.join(o.id for o in hit)}")
+    # коридор от ворот до улицы должен быть свободен (машина заезжает прямо с улицы)
+    door = max(gd, key=lambda d: d.aabb_max[0] - d.aabb_min[0]) if gd else None
+    dx0, dx1 = (door.aabb_min[0], door.aabb_max[0]) if door is not None else (C.GX0 + 0.3, C.GX1 - 0.3)
+    lane = Obj("_lane", "box", "other", [(dx0 + dx1) / 2, (C.GY1 + 0.05 + C.STREET_Y[0]) / 2, 1.0],
+               [max(dx1 - dx0 - 0.1, 0.1), C.STREET_Y[0] - C.GY1 - 0.1, 1.9])
+    lane.aabb_min[2] = 0.06
+    block = [o for o in sc.objects if o is not door and o.tag != "garage_door" and _aabb_overlap(o, lane)]
+    parts = []
+    if hit:
+        parts.append(f"пандус/площадка пересекает гараж: {', '.join(o.id for o in hit)}")
+    if block:
+        parts.append(f"проезд от ворот к улице перекрыт: {', '.join(o.id for o in block[:6])}")
+    s6 = 1.0 - 0.5 * bool(hit) - 0.5 * bool(block)
+    add("G6", s6, not parts, "; ".join(parts) or "пандус не задет, проезд от ворот до улицы свободен")
 
     prev_ok = {c.id for c in prev_base if c.passed and not c.id.startswith("F")}
     now_ok = {c.id for c in base if c.passed}
