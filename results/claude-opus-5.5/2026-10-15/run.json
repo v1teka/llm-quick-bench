@@ -1,0 +1,891 @@
+{
+ "model": "Claude Opus 5.5",
+ "date": "2026-10-15 19:33",
+ "phases": [
+  {
+   "kind": "build",
+   "label": "Попытка 1",
+   "step": "1",
+   "error": "",
+   "score": 1.0,
+   "scene_file": "scene_01_build.json",
+   "checks": [
+    {
+     "id": "F1",
+     "name": "Строгий JSON",
+     "abilities": [
+      "format"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "JSON разобран",
+     "phase": "base"
+    },
+    {
+     "id": "F2",
+     "name": "Схема объектов",
+     "abilities": [
+      "format"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "ошибок в объектах: 0 из 108",
+     "phase": "base"
+    },
+    {
+     "id": "F3",
+     "name": "Бюджет объектов",
+     "abilities": [
+      "format"
+     ],
+     "weight": 0.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "объектов: 108",
+     "phase": "base"
+    },
+    {
+     "id": "S1",
+     "name": "Габариты 10×8",
+     "abilities": [
+      "spec",
+      "spatial"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "наружные грани стен: x 0.00…10.00, y 0.00…8.00 (нужно 0…10 × 0…8)",
+     "phase": "base"
+    },
+    {
+     "id": "S2",
+     "name": "Отметки этажей",
+     "abilities": [
+      "spec",
+      "spatial"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "пол 1 эт. (верх 0.45) покрывает 100% площади; пол 2 эт. (верх 3.45) — 93%",
+     "phase": "base"
+    },
+    {
+     "id": "S3",
+     "name": "Замкнутые стены",
+     "abilities": [
+      "spatial",
+      "spec"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "периметр закрыт стенами/проёмами на 100%",
+     "phase": "base"
+    },
+    {
+     "id": "S4",
+     "name": "Двускатная крыша",
+     "abilities": [
+      "spec",
+      "spatial"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "макс. высота 9.00 (нужно 9.0); конёк вдоль X: да; скаты на юг/север: да; крыша над всем домом: да",
+     "phase": "base"
+    },
+    {
+     "id": "S5",
+     "name": "Свесы крыши",
+     "abilities": [
+      "spatial"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "свес ≥ 0.3 м есть в 100% контрольных точек",
+     "phase": "base"
+    },
+    {
+     "id": "S6",
+     "name": "Цвета",
+     "abilities": [
+      "spec"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "крыша: ок; стены: ок; стекло: ок; двери: ок",
+     "phase": "base"
+    },
+    {
+     "id": "S7",
+     "name": "Дымоход",
+     "abilities": [
+      "spec",
+      "physics"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "верх трубы 9.70 (нужно ≥ 9.5); над домом: да; проходит сквозь кровлю: да",
+     "phase": "base"
+    },
+    {
+     "id": "S8",
+     "name": "Окна на всех фасадах",
+     "abilities": [
+      "spec",
+      "spatial"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "окон по фасадам: N1=2, N2=2, S1=3, S2=4, E1=2, E2=2, W1=2, W2=2",
+     "phase": "base"
+    },
+    {
+     "id": "S9",
+     "name": "Окна в стенах",
+     "abilities": [
+      "spatial"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "в наружных стенах 19 из 19 окон",
+     "phase": "base"
+    },
+    {
+     "id": "S10",
+     "name": "Высоты окон",
+     "abilities": [
+      "spec",
+      "math"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "по высоте в норме 19 из 19",
+     "phase": "base"
+    },
+    {
+     "id": "S11",
+     "name": "Вход со стороны улицы",
+     "abilities": [
+      "inference",
+      "spatial"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "дверь door_main на северном фасаде, 1.00×2.10",
+     "phase": "base"
+    },
+    {
+     "id": "S12",
+     "name": "Пандус ≤ 1:12",
+     "abilities": [
+      "inference",
+      "math"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "макс. уклон 0.047 (≈1:21), нужно ≤ 1:12; от земли до пола 1 эт.: да",
+     "phase": "base"
+    },
+    {
+     "id": "S13",
+     "name": "Пандус ведёт к двери",
+     "abilities": [
+      "spatial",
+      "inference"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "верх пандуса/площадка примыкает к входной двери",
+     "phase": "base"
+    },
+    {
+     "id": "S14",
+     "name": "Солнечный фасад",
+     "abilities": [
+      "inference"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "остекление: юг 20.5 м², север 5.5 м² (юг/север = 3.71, нужно ≥ 2)",
+     "phase": "base"
+    },
+    {
+     "id": "S15",
+     "name": "Геометрия лестницы",
+     "abilities": [
+      "math",
+      "spatial"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "подъёмов 16, высота 0.187…0.188 (≤ 0.19); проступь мин. 0.28 (≥ 0.26); ширина мин. 1.20 (≥ 0.9)",
+     "phase": "base"
+    },
+    {
+     "id": "S16",
+     "name": "Лестница соединяет этажи",
+     "abilities": [
+      "spatial"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "первая ступень +0.19 от пола 1 эт.: ок; до пола 2 эт. 0.19: ок; внутри дома: да; выход на перекрытие 2 эт.: да",
+     "phase": "base"
+    },
+    {
+     "id": "S17",
+     "name": "Просвет над лестницей",
+     "abilities": [
+      "spatial",
+      "inference"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "над всеми ступенями просвет ≥ 2 м",
+     "phase": "base"
+    },
+    {
+     "id": "S18",
+     "name": "Балкон",
+     "abilities": [
+      "spec",
+      "spatial"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "балкон balcony_slab: с юга да, глубина 1.50, ширина 4.00, верх 3.45",
+     "phase": "base"
+    },
+    {
+     "id": "S19",
+     "name": "Ограждение балкона",
+     "abilities": [
+      "spec",
+      "physics"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "ограждение 0.95–1.15 м: фронт ок, запад ок, восток ок",
+     "phase": "base"
+    },
+    {
+     "id": "S20",
+     "name": "Выход на балкон",
+     "abilities": [
+      "inference",
+      "spatial"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "есть дверь на балкон",
+     "phase": "base"
+    },
+    {
+     "id": "S21",
+     "name": "Ничего не висит в воздухе",
+     "abilities": [
+      "physics"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "все объекты опираются на землю или друг на друга",
+     "phase": "base"
+    },
+    {
+     "id": "S22",
+     "name": "В границах участка",
+     "abilities": [
+      "spatial"
+     ],
+     "weight": 0.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "всё на участке",
+     "phase": "base"
+    },
+    {
+     "id": "P1",
+     "name": "План = постройка",
+     "abilities": [
+      "planning"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "заявлено/построено: вход N/N; подъёмов 16.0/16; подъём 0.1875/0.188; проступь 0.28/0.28; пандус 9.6/9.60; конёк 9.0/9.00",
+     "phase": "base"
+    },
+    {
+     "id": "P2",
+     "name": "Расчёты в плане",
+     "abilities": [
+      "math",
+      "planning"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "подъёмы×высота = 3.000 (нужно 3.0); подъём ≤ 0.19: да; проступь ≥ 0.26: да; длина пандуса ≥ 5.4: да",
+     "phase": "base"
+    }
+   ],
+   "extra_checks": []
+  },
+  {
+   "kind": "change",
+   "label": "Изменение ТЗ: гараж",
+   "step": "+ГАРАЖ",
+   "error": "",
+   "score": 1.0,
+   "scene_file": "scene_02_change.json",
+   "checks": [
+    {
+     "id": "F1",
+     "name": "Строгий JSON",
+     "abilities": [
+      "format"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "JSON разобран",
+     "phase": "change"
+    },
+    {
+     "id": "F2",
+     "name": "Схема объектов",
+     "abilities": [
+      "format"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "ошибок в объектах: 0 из 120",
+     "phase": "change"
+    },
+    {
+     "id": "F3",
+     "name": "Бюджет объектов",
+     "abilities": [
+      "format"
+     ],
+     "weight": 0.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "объектов: 120",
+     "phase": "change"
+    },
+    {
+     "id": "S1",
+     "name": "Габариты 10×8",
+     "abilities": [
+      "spec",
+      "spatial"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "наружные грани стен: x 0.00…10.00, y 0.00…8.00 (нужно 0…10 × 0…8)",
+     "phase": "change"
+    },
+    {
+     "id": "S2",
+     "name": "Отметки этажей",
+     "abilities": [
+      "spec",
+      "spatial"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "пол 1 эт. (верх 0.45) покрывает 100% площади; пол 2 эт. (верх 3.45) — 93%",
+     "phase": "change"
+    },
+    {
+     "id": "S3",
+     "name": "Замкнутые стены",
+     "abilities": [
+      "spatial",
+      "spec"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "периметр закрыт стенами/проёмами на 100%",
+     "phase": "change"
+    },
+    {
+     "id": "S4",
+     "name": "Двускатная крыша",
+     "abilities": [
+      "spec",
+      "spatial"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "макс. высота 9.00 (нужно 9.0); конёк вдоль X: да; скаты на юг/север: да; крыша над всем домом: да",
+     "phase": "change"
+    },
+    {
+     "id": "S5",
+     "name": "Свесы крыши",
+     "abilities": [
+      "spatial"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "свес ≥ 0.3 м есть в 100% контрольных точек",
+     "phase": "change"
+    },
+    {
+     "id": "S6",
+     "name": "Цвета",
+     "abilities": [
+      "spec"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "крыша: ок; стены: ок; стекло: ок; двери: ок",
+     "phase": "change"
+    },
+    {
+     "id": "S7",
+     "name": "Дымоход",
+     "abilities": [
+      "spec",
+      "physics"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "верх трубы 9.70 (нужно ≥ 9.5); над домом: да; проходит сквозь кровлю: да",
+     "phase": "change"
+    },
+    {
+     "id": "S8",
+     "name": "Окна на всех фасадах",
+     "abilities": [
+      "spec",
+      "spatial"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "окон по фасадам: N1=3, N2=2, S1=3, S2=4, E1=1, E2=2, W1=2, W2=2",
+     "phase": "change"
+    },
+    {
+     "id": "S9",
+     "name": "Окна в стенах",
+     "abilities": [
+      "spatial"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "в наружных стенах 19 из 19 окон",
+     "phase": "change"
+    },
+    {
+     "id": "S10",
+     "name": "Высоты окон",
+     "abilities": [
+      "spec",
+      "math"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "по высоте в норме 19 из 19",
+     "phase": "change"
+    },
+    {
+     "id": "S11",
+     "name": "Вход со стороны улицы",
+     "abilities": [
+      "inference",
+      "spatial"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "дверь door_main на северном фасаде, 1.00×2.10",
+     "phase": "change"
+    },
+    {
+     "id": "S12",
+     "name": "Пандус ≤ 1:12",
+     "abilities": [
+      "inference",
+      "math"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "макс. уклон 0.047 (≈1:21), нужно ≤ 1:12; от земли до пола 1 эт.: да",
+     "phase": "change"
+    },
+    {
+     "id": "S13",
+     "name": "Пандус ведёт к двери",
+     "abilities": [
+      "spatial",
+      "inference"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "верх пандуса/площадка примыкает к входной двери",
+     "phase": "change"
+    },
+    {
+     "id": "S14",
+     "name": "Солнечный фасад",
+     "abilities": [
+      "inference"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "остекление: юг 20.5 м², север 6.1 м² (юг/север = 3.38, нужно ≥ 2)",
+     "phase": "change"
+    },
+    {
+     "id": "S15",
+     "name": "Геометрия лестницы",
+     "abilities": [
+      "math",
+      "spatial"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "подъёмов 16, высота 0.187…0.188 (≤ 0.19); проступь мин. 0.28 (≥ 0.26); ширина мин. 1.20 (≥ 0.9)",
+     "phase": "change"
+    },
+    {
+     "id": "S16",
+     "name": "Лестница соединяет этажи",
+     "abilities": [
+      "spatial"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "первая ступень +0.19 от пола 1 эт.: ок; до пола 2 эт. 0.19: ок; внутри дома: да; выход на перекрытие 2 эт.: да",
+     "phase": "change"
+    },
+    {
+     "id": "S17",
+     "name": "Просвет над лестницей",
+     "abilities": [
+      "spatial",
+      "inference"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "над всеми ступенями просвет ≥ 2 м",
+     "phase": "change"
+    },
+    {
+     "id": "S18",
+     "name": "Балкон",
+     "abilities": [
+      "spec",
+      "spatial"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "балкон balcony_slab: с юга да, глубина 1.50, ширина 4.00, верх 3.45",
+     "phase": "change"
+    },
+    {
+     "id": "S19",
+     "name": "Ограждение балкона",
+     "abilities": [
+      "spec",
+      "physics"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "ограждение 0.95–1.15 м: фронт ок, запад ок, восток ок",
+     "phase": "change"
+    },
+    {
+     "id": "S20",
+     "name": "Выход на балкон",
+     "abilities": [
+      "inference",
+      "spatial"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "есть дверь на балкон",
+     "phase": "change"
+    },
+    {
+     "id": "S21",
+     "name": "Ничего не висит в воздухе",
+     "abilities": [
+      "physics"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "все объекты опираются на землю или друг на друга",
+     "phase": "change"
+    },
+    {
+     "id": "S22",
+     "name": "В границах участка",
+     "abilities": [
+      "spatial"
+     ],
+     "weight": 0.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "всё на участке",
+     "phase": "change"
+    },
+    {
+     "id": "P1",
+     "name": "План = постройка",
+     "abilities": [
+      "planning"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "заявлено/построено: вход N/N; подъёмов 16.0/16; подъём 0.1875/0.188; проступь 0.28/0.28; пандус 9.6/9.60; конёк 9.0/9.00",
+     "phase": "change"
+    },
+    {
+     "id": "P2",
+     "name": "Расчёты в плане",
+     "abilities": [
+      "math",
+      "planning"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "подъёмы×высота = 3.000 (нужно 3.0); подъём ≤ 0.19: да; проступь ≥ 0.26: да; длина пандуса ≥ 5.4: да",
+     "phase": "change"
+    }
+   ],
+   "extra_checks": [
+    {
+     "id": "G1",
+     "name": "Стены гаража",
+     "abilities": [
+      "change",
+      "spatial"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "стены гаража: x 10.00…14.00, y 3.00…8.00, z 0.00…3.00",
+     "phase": "change"
+    },
+    {
+     "id": "G2",
+     "name": "Плоская крыша гаража",
+     "abilities": [
+      "change",
+      "spec"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "крыша гаража на 3.2 м покрывает 100%; плоская: да",
+     "phase": "change"
+    },
+    {
+     "id": "G3",
+     "name": "Ворота к улице",
+     "abilities": [
+      "change",
+      "inference"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "ворота garage_door: север (улица), ширина 2.80, высота 2.30, низ 0.00",
+     "phase": "change"
+    },
+    {
+     "id": "G4",
+     "name": "Дверь гараж→дом",
+     "abilities": [
+      "change",
+      "spatial"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "дверь из гаража в дом есть",
+     "phase": "change"
+    },
+    {
+     "id": "G5",
+     "name": "Окна не в гараж",
+     "abilities": [
+      "change",
+      "inference"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "окна в гараж не выходят",
+     "phase": "change"
+    },
+    {
+     "id": "G6",
+     "name": "Пандус и подъезд к воротам",
+     "abilities": [
+      "change",
+      "spatial",
+      "inference"
+     ],
+     "weight": 1.5,
+     "score": 1.0,
+     "passed": true,
+     "detail": "пандус не задет, проезд от ворот до улицы свободен",
+     "phase": "change"
+    },
+    {
+     "id": "G7",
+     "name": "Без регрессий",
+     "abilities": [
+      "change"
+     ],
+     "weight": 2.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "все прежде пройденные проверки сохранились",
+     "phase": "change"
+    },
+    {
+     "id": "G8",
+     "name": "Сохранены объекты",
+     "abilities": [
+      "change",
+      "planning"
+     ],
+     "weight": 1.0,
+     "score": 1.0,
+     "passed": true,
+     "detail": "без изменений осталось 100% объектов дома (64 из 64)",
+     "phase": "change"
+    }
+   ]
+  }
+ ],
+ "abilities": {
+  "format": 1.0,
+  "spec": 1.0,
+  "spatial": 1.0,
+  "math": 1.0,
+  "inference": 1.0,
+  "physics": 1.0,
+  "planning": 1.0,
+  "change": 1.0,
+  "self_fix": null,
+  "vision": 1.0
+ },
+ "overall": 1.0,
+ "self_fix": null,
+ "vision": {
+  "score": 1.0,
+  "detail": "окна юг: 3/2 (верно 3/2); отличия: b,c,d (верно b,c,d), Жаккар 1.00"
+ },
+ "usage": {
+  "in": 0,
+  "out": 0,
+  "seconds": 958.0,
+  "calls": 3
+ },
+ "stats_lines": [
+  "Попытка 1: 100% · с гаражом: 100%",
+  "Запросов: 3 · токены вх/вых: 0/0 · 958 с",
+  "2026-10-15 · режим: manual"
+ ],
+ "checks_groups": [
+  [
+   "Попытка 1",
+   [
+    "F1@base",
+    "F2@base",
+    "F3@base",
+    "S1@base",
+    "S2@base",
+    "S3@base",
+    "S4@base",
+    "S5@base",
+    "S6@base",
+    "S7@base",
+    "S8@base",
+    "S9@base",
+    "S10@base",
+    "S11@base",
+    "S12@base",
+    "S13@base",
+    "S14@base",
+    "S15@base",
+    "S16@base",
+    "S17@base",
+    "S18@base",
+    "S19@base",
+    "S20@base",
+    "S21@base",
+    "S22@base",
+    "P1@base",
+    "P2@base"
+   ]
+  ],
+  [
+   "Изменение ТЗ",
+   [
+    "G1@change",
+    "G2@change",
+    "G3@change",
+    "G4@change",
+    "G5@change",
+    "G6@change",
+    "G7@change",
+    "G8@change"
+   ]
+  ]
+ ],
+ "n_checks": 36,
+ "mode": "manual"
+}

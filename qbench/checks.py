@@ -714,7 +714,9 @@ def run_change(pr: ParseResult, prev_scene: Scene | None, prev_base: list[CheckR
 
     gbox = Obj("_g", "box", "other", [(C.GX0 + C.GX1) / 2, (C.GY0 + C.GY1) / 2, C.GARAGE_ROOF_TOP / 2],
                [C.GX1 - C.GX0 - 0.02, C.GY1 - C.GY0 - 0.02, C.GARAGE_ROOF_TOP])
-    hit = [o for o in sc.objects if o.tag in ("ramp", "landing") and _aabb_overlap(o, gbox)]
+    # пандус/площадка, заходящие в гараж снаружи (целиком внутренняя площадка у двери — допустима)
+    inside = lambda o: bool(np.all(o.aabb_min >= gbox.aabb_min - 0.01) and np.all(o.aabb_max <= gbox.aabb_max + 0.01))  # noqa: E731
+    hit = [o for o in sc.objects if o.tag in ("ramp", "landing") and _aabb_overlap(o, gbox) and not inside(o)]
     # коридор от ворот до улицы должен быть свободен (машина заезжает прямо с улицы)
     door = max(gd, key=lambda d: d.aabb_max[0] - d.aabb_min[0]) if gd else None
     dx0, dx1 = (door.aabb_min[0], door.aabb_max[0]) if door is not None else (C.GX0 + 0.3, C.GX1 - 0.3)
@@ -738,14 +740,19 @@ def run_change(pr: ParseResult, prev_scene: Scene | None, prev_base: list[CheckR
         f"сломалось после изменения: {', '.join(f'{i} {BASE[i][0]}' for i in lost)}")
 
     if prev_scene and prev_scene.objects:
+        # сам дом (пятно застройки) не должен перестраиваться; восточный фасад 1 этажа и всё,
+        # что снаружи (пандус и т.п.), можно менять — это прямое следствие пристройки гаража
         cur = {o.id: o for o in sc.objects}
+        core = [o for o in prev_scene.objects
+                if C.X0 <= o.center[0] <= C.X1 and C.Y0 <= o.center[1] <= C.Y1
+                and not (o.tag in ("window", "door") and facade(o) == "E" and level_of(o) == 0)]
         same = 0
-        for o in prev_scene.objects:
+        for o in core:
             c = cur.get(o.id)
             if c is not None and c.type == o.type and np.allclose(c.center, o.center, atol=0.011) and np.allclose(c.size, o.size, atol=0.011):
                 same += 1
-        f = same / len(prev_scene.objects)
-        add("G8", f, f >= 0.85, f"без изменений осталось {f:.0%} прежних объектов")
+        f = same / len(core) if core else 0.0
+        add("G8", f, f >= 0.9, f"без изменений осталось {f:.0%} объектов дома ({same} из {len(core)})")
     else:
         add("G8", 0, False, "нет предыдущей сцены")
     return base, out
