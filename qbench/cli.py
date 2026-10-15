@@ -86,6 +86,50 @@ def cmd_leaderboard(a):
     print(update_leaderboard(a.results))
 
 
+def cmd_hard(a):
+    from .hard import runner as HR
+    from .hard import film
+    label = a.label or (a.model if a.model != "mock" else "Mock (Pro демо)")
+    if a.manual:
+        out = a.out_dir or a.manual
+        factory = HR.manual_factory(a.manual)
+    elif a.model == "mock":
+        out = a.out_dir or os.path.join(a.results, "pro", "mock")
+        factory = HR.mock_factory()
+    else:
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        out = a.out_dir or os.path.join(a.results, "pro", slug(label), stamp)
+        extra = json.loads(a.extra) if a.extra else None
+        factory = HR.api_factory(a.model, base_url=a.base_url,
+                                 api_key=os.environ.get(a.api_key_env) if a.api_key_env else None,
+                                 max_tokens=a.max_tokens, temperature=a.temperature, extra=extra)
+    os.makedirs(out, exist_ok=True)
+    print(f"Прогон Pro «{label}» → {out}")
+    run = HR.HardRun(factory, label, out, fix_rounds=a.fix_rounds)
+    try:
+        summary = run.execute()
+    except HR.Pending as e:
+        print("\nРучной режим: нужны ответы модели на промпты (их можно решать параллельно):")
+        for p in e.args[0]:
+            print(f"  промпт: {p.prompt_path}\n  ответ:  {p.response_path}")
+        sys.exit(3)
+    HR.save_summary(summary, out)
+    print(f"\nИтог: {summary['overall']:.0%}")
+    for k, v in summary["abilities"].items():
+        print(f"  {k:12s} {'—' if v is None else f'{v:.0%}'}")
+    if not a.no_video:
+        scene = next((p["scene"] for p in reversed(summary["phases"]) if p["scene"] is not None), None)
+        if scene is None:
+            print("Сцены дома нет — ролик не собран")
+            return
+        print("Рендер ролика…")
+        frames = film.build_film(summary, scene, summary["tasks"], out, quality=a.quality, fps=a.fps)
+        paths = film.save_outputs(frames, out, fps=a.fps)
+        frames[len(frames) // 3].save(os.path.join(out, "poster.png"))
+        for k, p in paths.items():
+            print(f"  {k}: {p}")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="qbench", description="llm-quick-bench · Дом-3D: быстрый комплексный бенчмарк LLM с видео-результатом")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -142,6 +186,23 @@ def main(argv=None):
 
     pp = sub.add_parser("prompt", help="напечатать задание (для ручного прогона в чате)")
     pp.set_defaults(fn=cmd_prompt)
+
+    h = sub.add_parser("pro", help="жёсткий набор «Дом-3D Pro»: детальный дом + 4 задачи на телевизорах")
+    h.add_argument("--model", required=True, help="id модели у провайдера или mock")
+    h.add_argument("--label")
+    h.add_argument("--base-url")
+    h.add_argument("--api-key-env")
+    h.add_argument("--max-tokens", type=int, default=64000)
+    h.add_argument("--temperature", type=float)
+    h.add_argument("--extra")
+    h.add_argument("--fix-rounds", type=int, default=1)
+    h.add_argument("--manual", metavar="DIR")
+    h.add_argument("--quality", choices=["fast", "normal", "high"], default="normal")
+    h.add_argument("--fps", type=int, default=12)
+    h.add_argument("--no-video", action="store_true")
+    h.add_argument("--results", default="results")
+    h.add_argument("--out-dir")
+    h.set_defaults(fn=cmd_hard)
 
     lb = sub.add_parser("leaderboard", help="пересобрать results/LEADERBOARD.md")
     lb.add_argument("--results", default="results")

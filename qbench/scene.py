@@ -122,7 +122,7 @@ class Obj:
         elif t in ("wedge", "gable"):
             tris = self._prism_tris()
         elif t == "cylinder":
-            n = 18
+            n = 8 if hx * 2 < 0.15 else (12 if hx * 2 < 0.6 else 18)
             a = np.linspace(0, 2 * np.pi, n + 1)
             ring = np.stack([np.cos(a) * hx, np.sin(a) * hx], 1)
             tl = []
@@ -133,7 +133,7 @@ class Obj:
                 tl += [[b0, b1, u1], [b0, u1, u0], [[0, 0, hz], u0, u1], [[0, 0, -hz], b1, b0]]
             tris = np.array(tl, float)
         else:  # sphere
-            nu, nv = 14, 8
+            nu, nv = (8, 5) if hx * 2 < 0.3 else ((10, 6) if hx * 2 < 1.0 else (14, 8))
             r = hx
             us = np.linspace(0, 2 * np.pi, nu + 1)
             vs = np.linspace(-np.pi / 2, np.pi / 2, nv + 1)
