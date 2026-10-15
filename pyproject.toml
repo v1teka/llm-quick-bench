@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-quick-bench"
+version = "0.1.0"
+description = "Быстрый комплексный бенчмарк LLM с видео-результатом: модель проектирует и строит 3D-дом"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = ["numpy>=1.22", "Pillow>=9.1", "requests>=2.28"]
+
+[project.optional-dependencies]
+mp4 = ["imageio>=2.20", "imageio-ffmpeg>=0.4"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+qbench = "qbench.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["qbench*"]
