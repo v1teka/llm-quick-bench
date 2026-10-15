@@ -172,15 +172,23 @@ def resample(pts, step):
 # ---------------------------------------------------------------------------
 
 def find_main_door(sc):
+    """-> (проём входной двери на северном фасаде или None, индекс закрытого полотна для анимации или None).
+    Полотно, нарисованное открытым (поперёк фасада), не анимируется."""
+    from .house_checks import door_openings
     best = None
-    for i in sc.idx("door"):
-        o = sc.objects[i]
-        if o.center[1] < C.Y1 - 0.6 or o.aabb_min[2] > C.FFL0 + 0.3 or o.aabb_max[2] > C.FFL1:
+    for op in door_openings(sc):
+        if op.center[1] < C.Y1 - 0.6 or op.aabb_min[2] > C.FFL0 + 0.3 or op.aabb_max[2] > C.FFL1:
             continue
-        w = o.aabb_max[0] - o.aabb_min[0]
+        w = op.aabb_max[0] - op.aabb_min[0]
         if best is None or w > best[1]:
-            best = (i, w)
-    return best[0] if best else None
+            best = (op, w)
+    if best is None:
+        return None, None
+    op = best[0]
+    closed = [i for i in op.leaf_idx
+              if sc.objects[i].aabb_max[0] - sc.objects[i].aabb_min[0] > sc.objects[i].aabb_max[1] - sc.objects[i].aabb_min[1]]
+    leaf = max(closed, key=lambda i: sc.objects[i].aabb_max[0] - sc.objects[i].aabb_min[0]) if closed else None
+    return op, leaf
 
 
 def door_group(sc, i):
@@ -312,7 +320,7 @@ def build_film(summary, scene, tasks, out_dir, quality="normal", fps=12, workers
     log("  тени этапов стройки…")
     G["stage_shadows"] = [ShadowMap(mesh.subset(rank < s), LIGHT, bnd, 1024) for s in stages]
     # дверь
-    di = find_main_door(sc)
+    op, di = find_main_door(sc)
     if di is not None:
         grp = door_group(sc, di)
         G["door_idx"] = grp
@@ -322,6 +330,8 @@ def build_film(summary, scene, tasks, out_dir, quality="normal", fps=12, workers
         d = sc.objects[di]
         G["hinge"] = np.array([d.aabb_min[0], d.center[1]])
         door_c = d.center.copy()
+    elif op is not None:
+        door_c = op.center.copy()
     else:
         door_c = np.array([6.5, C.Y1, C.FFL0 + 1.0])
     # карточки
@@ -376,7 +386,7 @@ def build_film(summary, scene, tasks, out_dir, quality="normal", fps=12, workers
         eye = p_out * (1 - s_) + p_door * s_
         jobs.append({"kind": "scene", "eye": eye, "tgt": np.array([door_c[0], door_c[1] - 2, C.FFL0 + 1.4]), "fov": 55,
                      "door": -math.radians(98) * s_ if di is not None else None, "tv": False,
-                     "caption": "Дверь открывается…", "score": hs, "step": "ВХОД"})
+                     "caption": "Дверь открывается…" if di is not None else "Вход в дом", "score": hs, "step": "ВХОД"})
     # --- маршрут по дому
     log("  воксели и маршрут камеры…")
     V = Voxels(sc, skip=G.get("door_idx", []))

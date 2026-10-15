@@ -129,6 +129,10 @@ def stair_levels(sc):
     steps = [o for o in steps if C.X0 - 0.5 < o.center[0] < C.X1 + 0.5 and C.Y0 - 0.5 < o.center[1] < C.Y1 + 0.5]
     if len(steps) < 4:
         return None
+    # промежуточные площадки (tag landing внутри дома между отметками этажей) — тоже уровни марша
+    steps += [sc.objects[i] for i in sc.idx("landing")
+              if C.X0 - 0.5 < sc.objects[i].center[0] < C.X1 + 0.5 and C.Y0 - 0.5 < sc.objects[i].center[1] < C.Y1 + 0.5
+              and C.FFL0 + 0.05 < sc.objects[i].aabb_max[2] < C.FFL1 - 0.05]
     steps.sort(key=lambda o: o.aabb_max[2])
     lv = []
     for o in steps:
@@ -170,6 +174,53 @@ def stair_levels(sc):
             f1, b1 = proj(lv[i + 1], d)
             treads.append(max(f1 - f0, b1 - b0))
     return {"levels": lv, "risers": risers, "treads": treads, "widths": widths, "dirs": dirs}
+
+
+class DoorOpening:
+    """Дверной проём: полотна (door) и коробка (door_frame), касающиеся друг друга.
+    Положение проёма берётся по коробке, если она есть: полотно можно нарисовать открытым."""
+
+    def __init__(self, sc, leaves, frames):
+        ref = frames or leaves
+        self.leaf_idx, self.frame_idx = leaves, frames
+        self.aabb_min = np.min([sc.objects[i].aabb_min for i in ref], 0)
+        self.aabb_max = np.max([sc.objects[i].aabb_max for i in ref], 0)
+        self.center = (self.aabb_min + self.aabb_max) / 2
+        self.id = sc.objects[leaves[0]].id
+        self.tag = "door"
+
+
+def door_openings(sc):
+    leaves, frames = list(sc.idx("door")), list(sc.idx("door_frame"))
+    idx = leaves + frames
+    if not leaves:
+        return []
+    mn = np.array([sc.objects[i].aabb_min for i in idx])
+    mx = np.array([sc.objects[i].aabb_max for i in idx])
+    par = list(range(len(idx)))
+
+    def find(a):
+        while par[a] != a:
+            par[a] = par[par[a]]
+            a = par[a]
+        return a
+    gap = 0.03
+    for a in range(len(idx)):
+        near = np.all((mn <= mx[a] + gap) & (mx >= mn[a] - gap), 1)
+        for b in np.nonzero(near)[0]:
+            if b > a:
+                par[find(a)] = find(int(b))
+    groups = {}
+    for a in range(len(idx)):
+        groups.setdefault(find(a), []).append(a)
+    out = []
+    nl = len(leaves)
+    for g in groups.values():
+        ls = [idx[a] for a in g if a < nl]
+        fs = [idx[a] for a in g if a >= nl]
+        if ls:
+            out.append(DoorOpening(sc, ls, fs))
+    return out
 
 
 def side_enclosed(sc, pts):
@@ -286,24 +337,28 @@ def _run_house(pr: ParseResult2, out):
 
     # ---- H4 черепица
     if roofs and len(tiles_idx):
-        xs = np.arange(-0.3, 13.31, 0.25)
-        ys = np.arange(-0.3, 10.31, 0.25)
-        X, Y = np.meshgrid(xs, ys, indexing="ij")
+        # случайные точки, а не регулярная сетка: сетка «попадает в такт» шагу плиток и меряет зазоры, а не площадь
+        rng = np.random.default_rng(2026)
+        X = rng.uniform(-0.3, 13.3, 6000)
+        Y = rng.uniform(-0.3, 10.3, 6000)
+        order = np.argsort(X)
+        X, Y = X[order], Y[order]
         base = np.full(X.shape, np.nan)
         for o in roofs:
             base = np.fmax(base, o.top_at(X, Y))
         top = np.full(X.shape, np.nan)
         tl = [sc.objects[i] for i in tiles_idx]
-        # ускорение: только клетки внутри AABB плитки
+        # ускорение: только точки внутри AABB плитки
         for o in tl:
-            ia = np.searchsorted(xs, o.aabb_min[0] - 1e-9)
-            ib = np.searchsorted(xs, o.aabb_max[0] + 1e-9)
-            ja = np.searchsorted(ys, o.aabb_min[1] - 1e-9)
-            jb = np.searchsorted(ys, o.aabb_max[1] + 1e-9)
-            if ia >= ib or ja >= jb:
+            ia = np.searchsorted(X, o.aabb_min[0] - 1e-9)
+            ib = np.searchsorted(X, o.aabb_max[0] + 1e-9)
+            if ia >= ib:
                 continue
-            t = o.top_at(X[ia:ib, ja:jb], Y[ia:ib, ja:jb])
-            top[ia:ib, ja:jb] = np.fmax(top[ia:ib, ja:jb], t)
+            sel = np.arange(ia, ib)
+            sel = sel[(Y[sel] >= o.aabb_min[1] - 1e-9) & (Y[sel] <= o.aabb_max[1] + 1e-9)]
+            if not len(sel):
+                continue
+            top[sel] = np.fmax(top[sel], o.top_at(X[sel], Y[sel]))
         mask = np.isfinite(base)
         cov = (np.nan_to_num(top, nan=-9) >= base - 0.02) & (np.nan_to_num(top, nan=-9) <= base + 0.25)
         frac = float(cov[mask].mean()) if mask.any() else 0.0
@@ -363,7 +418,7 @@ def _run_house(pr: ParseResult2, out):
         if w < 0.25 or h < 0.25:
             continue
         gl.append((o, f, lv, w, h))
-    doors = [sc.objects[i] for i in sc.idx("door")]
+    doors = door_openings(sc)
     ext_doors = [(o, facade_of(o), level_of(o.aabb_min[2] + 0.1)) for o in doors if facade_of(o)]
 
     # ---- H7 реальные проёмы
@@ -977,7 +1032,7 @@ def _run_house(pr: ParseResult2, out):
         "черепица": maj(tl, lambda h, s, v: (h <= 45 / 360 or h >= 330 / 360) and s >= 0.25 and 0.2 <= v <= 0.85),
         "стены": maj([sc.objects[i] for i in walls_idx], lambda h, s, v: v >= 0.7 and s <= 0.35),
         "стекло": maj([o for o, *_ in gl], lambda h, s, v: 0.45 <= h <= 0.72 and s >= 0.08),
-        "двери": maj(doors, lambda h, s, v: (h <= 50 / 360 or h >= 345 / 360) and s >= 0.2 and v <= 0.75),
+        "двери": maj([sc.objects[i] for i in sc.idx("door")], lambda h, s, v: (h <= 50 / 360 or h >= 345 / 360) and s >= 0.2 and v <= 0.75),
         "экраны": maj(list(sc.tvs.values()), lambda h, s, v: v <= 0.25),
     }
     add("H31", sum(g.values()) / len(g), all(g.values()), "; ".join(f"{k}: {'ок' if v else 'не то'}" for k, v in g.items()))
