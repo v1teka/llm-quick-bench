@@ -237,7 +237,24 @@ def guard_ok(sc, span_lo, span_hi, axis_d, edge_coord, side_sign, surf_z, rail_h
 # ---------------------------------------------------------------------------
 
 def run_house(pr: ParseResult2):
+    """Безопасная обёртка: внутренняя ошибка валидатора не роняет прогон, а помечается в отчёте."""
     out = []
+    try:
+        _run_house(pr, out)
+    except Exception as e:  # noqa: BLE001
+        import traceback
+        done = {c.id for c in out}
+        msg = f"внутренняя ошибка валидатора: {type(e).__name__}: {e}"
+        traceback.print_exc()
+        for cid, (name, ab, w) in CHECKS.items():
+            if cid not in done:
+                out.append(CheckResult(cid, name, ab, w, 0.0, False, msg, "house"))
+    order = {cid: k for k, cid in enumerate(CHECKS)}
+    out.sort(key=lambda c: order.get(c.id, 99))
+    return out
+
+
+def _run_house(pr: ParseResult2, out):
 
     def add(cid, score, passed, detail):
         name, ab, w = CHECKS[cid]
