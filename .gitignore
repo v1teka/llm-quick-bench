@@ -7,3 +7,4 @@ __pycache__/
 results/*
 !results/LEADERBOARD.md
 !results/claude-opus-5.5/
+!results/claude-opus-5.5-pro/

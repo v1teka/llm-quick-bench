@@ -44,7 +44,7 @@ def task_instance(key, seed):
         json.dump(inst, f, ensure_ascii=False)
     return inst
 TASK_ABILITY = {"arc": "logic", "optics": "simulation", "nav": "plan_search", "cube": "rotation"}
-TASK_SYSTEM = "Ты внимательно решаешь задачи и отвечаешь строго в требуемом формате."
+TASK_SYSTEM = "Ты внимательно решаешь задачи и отвечаешь строго в требуемом формате. " + P.BUDGET
 
 
 class Pending(Exception):
@@ -62,7 +62,7 @@ class HardRun:
         self.seed = seed
         self.log = log
         self.pending = []
-        self.usage = {"in": 0, "out": 0, "seconds": 0.0, "calls": 0}
+        self.usage = {"in": 0, "out": 0, "seconds": 0.0, "calls": 0, "overruns": 0}
         os.makedirs(os.path.join(out_dir, "responses"), exist_ok=True)
 
     def _ask(self, client, msgs, phase):
@@ -71,6 +71,7 @@ class HardRun:
         self.usage["out"] += usage.get("out", 0) or 0
         self.usage["seconds"] += sec or 0
         self.usage["calls"] += 1
+        self.usage["overruns"] += usage.get("overruns", 0) or 0
         with open(os.path.join(self.out, "responses", f"{phase}.md"), "w", encoding="utf-8") as f:
             f.write(text)
         self.log(f"  · {phase}: {len(text)} симв., {sec:.0f} с")
@@ -173,7 +174,10 @@ class HardRun:
         stats = [
             f"Дом: попытка 1 — {hs0:.0%}" + (f", после исправления — {hs1:.0%}" if len(phases) > 1 else "") if phases else "Дом: нет",
             "Задачи: " + ", ".join(f"{t['title']} {t['res']['score']:.0%}" for t in tasks.values()),
-            f"Запросов: {self.usage['calls']} · {dt.date.today().isoformat()}",
+            f"Запросов: {self.usage['calls']}"
+            + (f" · токенов вывода: {self.usage['out'] / 1000:.0f} тыс." if self.usage["out"] else "")
+            + (f" · превышений лимита: {self.usage['overruns']}" if self.usage["overruns"] else "")
+            + f" · {dt.date.today().isoformat()}",
         ]
         return {"model": self.model, "date": dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "phases": phases,
                 "tasks": tasks, "abilities": ab, "overall": overall, "house_score": hs1, "house_first": hs0,

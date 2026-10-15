@@ -23,6 +23,7 @@ BALCONY_DEPTH, BALCONY_WIDTH = 1.4, 3.0
 BALCONY_RAIL = (1.0, 1.15)
 
 MIN_PRIMS = 10000
+OUTPUT_BUDGET = 128_000  # лимит токенов вывода на один ответ, рассуждения входят в него
 MIN_COMPONENTS = 15
 MIN_TILES = 1000
 

@@ -30,7 +30,7 @@ class OpenAIClient:
     kind = "api"
 
     def __init__(self, model, base_url=None, api_key=None, max_tokens=32000, temperature=None,
-                 extra=None, timeout=900, retries=4):
+                 extra=None, timeout=900, retries=4, overrun_retries=0):
         import requests  # noqa: F401  (проверка зависимости)
         self.model = model
         self.base_url = (base_url or os.environ.get("QBENCH_BASE_URL") or "https://openrouter.ai/api/v1").rstrip("/")
@@ -39,6 +39,7 @@ class OpenAIClient:
         self.max_tokens, self.temperature = max_tokens, temperature
         self.extra = extra or {}
         self.timeout, self.retries = timeout, retries
+        self.overrun_retries = overrun_retries  # повторы, если лимит вывода исчерпан до ответа
 
     def _convert(self, messages):
         out = []
@@ -63,12 +64,14 @@ class OpenAIClient:
                    "X-Title": "llm-quick-bench"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        t0, err = time.time(), None
-        for attempt in range(self.retries + 1):
+        t0, err, overruns, used = time.time(), None, 0, {"in": 0, "out": 0}
+        attempt = 0
+        while attempt <= self.retries:
             try:
                 r = requests.post(f"{self.base_url}/chat/completions", headers=headers, json=body, timeout=self.timeout)
                 if r.status_code in (429, 500, 502, 503, 504) and attempt < self.retries:
                     time.sleep(min(60, 5 * 2 ** attempt))
+                    attempt += 1
                     continue
                 r.raise_for_status()
                 data = r.json()
@@ -77,12 +80,18 @@ class OpenAIClient:
                 if isinstance(text, list):
                     text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
                 u = data.get("usage") or {}
-                usage = {"in": u.get("prompt_tokens", 0), "out": u.get("completion_tokens", 0)}
-                return text, usage, time.time() - t0
+                used["in"] += u.get("prompt_tokens", 0) or 0
+                used["out"] += u.get("completion_tokens", 0) or 0
+                if not text.strip() and data["choices"][0].get("finish_reason") == "length":
+                    overruns += 1  # лимит вывода исчерпан рассуждениями, ответа нет
+                    if overruns <= self.overrun_retries:
+                        continue
+                return text, dict(used, overruns=overruns), time.time() - t0
             except requests.RequestException as e:
                 err = e
                 if attempt < self.retries:
                     time.sleep(min(60, 5 * 2 ** attempt))
+                attempt += 1
         raise RuntimeError(f"API недоступен: {err}")
 
 
@@ -111,7 +120,8 @@ class ManualClient:
             if os.path.exists(stem + ".meta.json"):
                 with open(stem + ".meta.json", encoding="utf-8") as f:
                     meta = json.load(f)
-            return text, {"in": meta.get("in", 0), "out": meta.get("out", 0)}, float(meta.get("seconds", 0))
+            return text, {"in": meta.get("in", 0), "out": meta.get("out", 0), "overruns": meta.get("overruns", 0)}, \
+                float(meta.get("seconds", 0))
         last = messages[-1]
         with open(stem + ".prompt.md", "w", encoding="utf-8") as f:
             if len([m for m in messages if m["role"] == "user"]) == 1:

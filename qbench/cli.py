@@ -102,7 +102,8 @@ def cmd_hard(a):
         extra = json.loads(a.extra) if a.extra else None
         factory = HR.api_factory(a.model, base_url=a.base_url,
                                  api_key=os.environ.get(a.api_key_env) if a.api_key_env else None,
-                                 max_tokens=a.max_tokens, temperature=a.temperature, extra=extra)
+                                 max_tokens=a.max_tokens, temperature=a.temperature, extra=extra,
+                                 overrun_retries=a.overrun_retries)
     os.makedirs(out, exist_ok=True)
     print(f"Прогон Pro «{label}» → {out}")
     run = HR.HardRun(factory, label, out, fix_rounds=a.fix_rounds)
@@ -192,7 +193,9 @@ def main(argv=None):
     h.add_argument("--label")
     h.add_argument("--base-url")
     h.add_argument("--api-key-env")
-    h.add_argument("--max-tokens", type=int, default=64000)
+    h.add_argument("--max-tokens", type=int, default=128000, help="лимит вывода на ответ (рассуждения входят в него)")
+    h.add_argument("--overrun-retries", type=int, default=3,
+                   help="сколько раз повторить запрос, если лимит исчерпан до ответа (как в Claude Code)")
     h.add_argument("--temperature", type=float)
     h.add_argument("--extra")
     h.add_argument("--fix-rounds", type=int, default=1)
