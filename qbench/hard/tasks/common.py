@@ -33,11 +33,46 @@ def get_item(answer, k):
     return None
 
 
+ITEM_KEYS = ("puzzles", "boards", "levels")
+SINGLE_NOTE = "\n\nВ этом запросе одна задача из набора — ответь JSON с единственным ключом \"1\"."
+
+
 class Task:
+    """Набор однотипных задач. Каждая задача набора отдаётся модели отдельным запросом
+    (prompt_item), ответы склеиваются в общий JSON (merge_items) и оцениваются score()."""
+
     key = ""
     title = ""
     channel = 0
     ability = ""
+
+    def items_key(self, inst):
+        return next(k for k in ITEM_KEYS if k in inst)
+
+    def n_items(self, inst):
+        return len(inst[self.items_key(inst)])
+
+    def prompt_item(self, inst, k):
+        """Тот же промпт, но только с k-й задачей набора (k с 1); в ответе она идёт под ключом "1"."""
+        key = self.items_key(inst)
+        return self.prompt(dict(inst, **{key: [inst[key][k - 1]]})) + SINGLE_NOTE
+
+    @staticmethod
+    def merge_items(texts):
+        """Ответы на отдельные задачи -> JSON-текст общего ответа {"1": ..., "2": ...}."""
+        merged = {}
+        for k, t in enumerate(texts, 1):
+            d = extract_json(t)
+            if not d:
+                continue
+            v = get_item(d, 1)
+            if v is None and len(d) == 1:
+                v = next(iter(d.values()))
+            if v is None:
+                v = get_item(d, k)
+            if v is not None:
+                merged[str(k)] = v
+        return json.dumps(merged, ensure_ascii=False)
 
     def generate(self, seed: int) -> dict:  # pragma: no cover - интерфейс
         raise NotImplementedError

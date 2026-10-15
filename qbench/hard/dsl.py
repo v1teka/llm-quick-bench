@@ -248,7 +248,8 @@ class ParseResult2:
         self.scene, self.strict, self.outside_chars, self.error = scene, strict, outside, error
 
 
-def parse_house(text):
+def extract_doc(text):
+    """JSON-документ сцены из ответа -> (data | None, strict, символов вне JSON, ошибка)."""
     text = text or ""
     blocks = re.findall(r"```(?:json|JSON)?\s*\n(.*?)```", text, flags=re.S)
     cands = sorted(blocks, key=len, reverse=True)
@@ -270,12 +271,80 @@ def parse_house(text):
             except Exception:  # noqa: BLE001
                 continue
     if not isinstance(data, dict):
-        return ParseResult2(None, False, len(text), "JSON сцены не найден или не разбирается")
+        return None, False, len(text), ("пустой ответ" if not text.strip() else "JSON сцены не найден или не разбирается")
     outside = len(text.replace(used, "").replace("```json", "").replace("```", "").strip())
+    return data, strict, outside, None
+
+
+def parse_house(text):
+    data, strict, outside, err = extract_doc(text)
+    if data is None:
+        return ParseResult2(None, False, outside, err)
     try:
-        return ParseResult2(build_scene(data, len(text)), strict, outside)
+        return ParseResult2(build_scene(data, len(text or "")), strict, outside)
     except DSLError as e:
         return ParseResult2(None, strict, outside, str(e))
+
+
+def merge_doc(base, part):
+    """Склейка частей сцены и патчей исправления.
+
+    "reset": true — начать сцену заново; "remove": [id, ...] — удалить объекты, экземпляры, комнаты
+    или компоненты прошлых частей; компоненты с тем же именем и объекты/экземпляры/комнаты с тем же id
+    заменяются, остальное добавляется; поля "plan" дописываются поверх.
+    """
+    base = {} if part.get("reset") else (base or {})
+    out = {"plan": dict(base.get("plan") or {}), "components": dict(base.get("components") or {}),
+           "objects": list(base.get("objects") or []), "instances": list(base.get("instances") or []),
+           "rooms": list(base.get("rooms") or [])}
+    rm = {str(x) for x in (part.get("remove") or []) if isinstance(x, (str, int))}
+    if rm:
+        for key in ("objects", "instances", "rooms"):
+            out[key] = [o for o in out[key] if not (isinstance(o, dict) and str(o.get("id")) in rm)]
+        for name in list(out["components"]):
+            if name in rm:
+                del out["components"][name]
+    if isinstance(part.get("plan"), dict):
+        out["plan"].update(part["plan"])
+    if isinstance(part.get("components"), dict):
+        out["components"].update(part["components"])
+    for key in ("objects", "instances", "rooms"):
+        new = part.get(key)
+        if not isinstance(new, list):
+            continue
+        pos = {str(o.get("id")): i for i, o in enumerate(out[key]) if isinstance(o, dict) and o.get("id") is not None}
+        for o in new:
+            oid = str(o.get("id")) if isinstance(o, dict) and o.get("id") is not None else None
+            if oid is not None and oid in pos:
+                out[key][pos[oid]] = o
+            else:
+                if oid is not None:
+                    pos[oid] = len(out[key])
+                out[key].append(o)
+    return out
+
+
+def parse_house_parts(texts):
+    """Сцена из нескольких ответов (части постройки + патчи) -> (ParseResult2, склеенный документ)."""
+    doc, strict, outside, errs, got = {}, True, 0, [], 0
+    for k, t in enumerate(texts, 1):
+        data, st, out, err = extract_doc(t)
+        outside += out
+        if data is None:
+            strict = False
+            errs.append(f"ответ {k}: {err}")
+            continue
+        got += 1
+        strict = strict and st
+        doc = merge_doc(doc, data)
+    if not got:
+        return ParseResult2(None, False, outside, "; ".join(errs) or "JSON сцены не найден"), doc
+    try:
+        sc = build_scene(doc, sum(len(t or "") for t in texts))
+    except DSLError as e:
+        return ParseResult2(None, strict, outside, str(e)), doc
+    sc.errors[:0] = errs
+    return ParseResult2(sc, strict, outside), doc
 
 
 def build_scene(data, raw_chars=0):

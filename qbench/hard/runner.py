@@ -15,7 +15,7 @@ from ..checks import CheckResult, weighted, self_fix_score
 from ..llm import ManualClient, NeedResponse
 from . import config as C
 from . import prompts as P
-from .dsl import parse_house, build_scene
+from .dsl import parse_house_parts
 from .house_checks import run_house, feedback, CHECKS
 from .tasks.arc import ArcTask
 from .tasks.cube import CubeTaskHarder
@@ -79,16 +79,22 @@ class HardRun:
 
     # ------------------------------------------------------------------
     def run_house(self):
+        """Постройка в P.N_PARTS ответах (каждый — свой лимит вывода), затем раунды исправления патчами."""
         client = self.factory("house")
         msgs = [{"role": "system", "content": P.SYSTEM}, {"role": "user", "content": P.BUILD}]
-        phases = []
-        try:
-            text = self._ask(client, msgs, "house_build")
-        except NeedResponse as e:
-            self.pending.append(e)
-            return phases
-        msgs.append({"role": "assistant", "content": text})
-        pr = parse_house(text)
+        phases, texts = [], []
+        for k in range(1, P.N_PARTS + 1):
+            if k > 1:
+                msgs.append({"role": "user", "content": P.PARTS[k]})
+            try:
+                text = self._ask(client, msgs, f"house_part{k}")
+            except NeedResponse as e:
+                self.pending.append(e)
+                return phases
+            msgs.append({"role": "assistant", "content": text})
+            texts.append(text)
+        pr, doc = parse_house_parts(texts)
+        self._save_doc(doc, "build")
         cs = run_house(pr)
         phases.append(self._phase("build", "Попытка 1", pr, cs))
         for r in range(self.fix_rounds):
@@ -102,10 +108,16 @@ class HardRun:
                 self.pending.append(e)
                 break
             msgs.append({"role": "assistant", "content": text})
-            pr = parse_house(text)
+            texts.append(text)
+            pr, doc = parse_house_parts(texts)
+            self._save_doc(doc, f"fix{r + 1}")
             cs = run_house(pr)
             phases.append(self._phase("fix", f"Исправление {r + 1}", pr, cs))
         return phases
+
+    def _save_doc(self, doc, name):
+        with open(os.path.join(self.out, f"scene_{name}.json"), "w", encoding="utf-8") as f:
+            json.dump(doc, f, ensure_ascii=False)
 
     def _phase(self, kind, label, pr, cs):
         ph = {"kind": kind, "label": label, "scene": pr.scene, "error": pr.error, "checks": cs, "score": weighted(cs)}
@@ -120,13 +132,21 @@ class HardRun:
         inst = task_instance(key, self.seed)
         with open(os.path.join(self.out, f"task_{key}.json"), "w", encoding="utf-8") as f:
             json.dump(inst, f, ensure_ascii=False)
-        client = self.factory(key)
-        msgs = [{"role": "system", "content": TASK_SYSTEM}, {"role": "user", "content": task.prompt(inst)}]
-        try:
-            text = self._ask(client, msgs, f"task_{key}")
-        except NeedResponse as e:
-            self.pending.append(e)
+        texts, waiting = [], False
+        for k in range(1, task.n_items(inst) + 1):
+            client = self.factory(f"{key}/{k}")  # каждая задача набора — отдельный запрос
+            msgs = [{"role": "system", "content": TASK_SYSTEM}, {"role": "user", "content": task.prompt_item(inst, k)}]
+            try:
+                texts.append(self._ask(client, msgs, f"task_{key}_{k}"))
+            except NeedResponse as e:
+                self.pending.append(e)
+                texts.append("")
+                waiting = True
+        if waiting:
             return None
+        text = task.merge_items(texts)
+        with open(os.path.join(self.out, "responses", f"task_{key}.json"), "w", encoding="utf-8") as f:
+            f.write(text)
         score, items = task.score(inst, text)
         self.log(f"  → {task.title}: {score:.0%}")
         return {"inst": inst, "res": {"score": score, "items": items}, "title": task.title}
@@ -247,11 +267,13 @@ class MockHard:
 
     def chat(self, messages, phase=""):
         from .reference import reference_house, flawed_house, as_response
-        if phase == "house_build":
+        if phase == "house_part1":
             return as_response(flawed_house()), {"in": 0, "out": 0}, 0.0
+        if phase.startswith("house_part"):
+            return "{}", {"in": 0, "out": 0}, 0.0
         if phase.startswith("house_fix"):
-            return as_response(reference_house()), {"in": 0, "out": 0}, 0.0
-        key = phase.replace("task_", "")
+            return as_response(dict(reference_house(), reset=True)), {"in": 0, "out": 0}, 0.0
+        key, item = phase.replace("task_", "").rsplit("_", 1)
         inst = task_instance(key, self.seed)
         if key == "arc":
             ans = {str(i + 1): p["answer"] for i, p in enumerate(inst["puzzles"])}
@@ -264,7 +286,7 @@ class MockHard:
         else:
             ans = {str(i + 1): ({"stamps": p["stamps"], **p["final"]} if p["kind"] == "sim" else {"moves": p["solution"]})
                    for i, p in enumerate(inst["puzzles"])}
-        return json.dumps(ans, ensure_ascii=False), {"in": 0, "out": 0}, 0.0
+        return json.dumps({"1": ans.get(item, "")}, ensure_ascii=False), {"in": 0, "out": 0}, 0.0
 
 
 def mock_factory():
