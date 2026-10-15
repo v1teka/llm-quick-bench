@@ -106,7 +106,7 @@ def cmd_hard(a):
                                  overrun_retries=a.overrun_retries)
     os.makedirs(out, exist_ok=True)
     print(f"Прогон Pro «{label}» → {out}")
-    run = HR.HardRun(factory, label, out, fix_rounds=a.fix_rounds)
+    run = HR.HardRun(factory, label, out, fix_rounds=a.fix_rounds, seed=a.seed)
     try:
         summary = run.execute()
     except HR.Pending as e:
@@ -199,6 +199,7 @@ def main(argv=None):
     h.add_argument("--temperature", type=float)
     h.add_argument("--extra")
     h.add_argument("--fix-rounds", type=int, default=1)
+    h.add_argument("--seed", type=int, default=2026, help="seed экземпляров головоломок (2026 — официальный, кэширован)")
     h.add_argument("--manual", metavar="DIR")
     h.add_argument("--quality", choices=["fast", "normal", "high"], default="normal")
     h.add_argument("--fps", type=int, default=12)
