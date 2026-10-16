@@ -53,7 +53,7 @@ class Pending(Exception):
 
 class HardRun:
     def __init__(self, client_factory, model_label, out_dir, fix_rounds=1, tasks=("arc", "optics", "nav", "cube"),
-                 seed=SEED, log=print):
+                 seed=SEED, log=print, puzzles="sets", item_diag=False):
         self.factory = client_factory  # conv_name -> client
         self.model = model_label
         self.out = out_dir
@@ -62,11 +62,17 @@ class HardRun:
         self.seed = seed
         self.log = log
         self.pending = []
+        # "sets" — набор головоломок одним запросом (официальный счёт); "items" — по головоломке на запрос
+        self.puzzles = puzzles
+        # при puzzles="sets" дополнительно спросить каждую головоломку отдельно (диагностика, в счёт не идёт)
+        self.item_diag = bool(item_diag) and puzzles == "sets"
+        self.last_usage = {}
         self.usage = {"in": 0, "out": 0, "seconds": 0.0, "calls": 0, "overruns": 0}
         os.makedirs(os.path.join(out_dir, "responses"), exist_ok=True)
 
     def _ask(self, client, msgs, phase):
         text, usage, sec = client.chat(msgs, phase=phase)
+        self.last_usage = usage
         self.usage["in"] += usage.get("in", 0) or 0
         self.usage["out"] += usage.get("out", 0) or 0
         self.usage["seconds"] += sec or 0
@@ -127,17 +133,15 @@ class HardRun:
             self.log(f"  → {label}: сцена не разобрана ({pr.error})")
         return ph
 
-    def run_task(self, key):
-        task = TASKS[key]()
-        inst = task_instance(key, self.seed)
-        with open(os.path.join(self.out, f"task_{key}.json"), "w", encoding="utf-8") as f:
-            json.dump(inst, f, ensure_ascii=False)
-        texts, waiting = [], False
+    def _ask_items(self, key, task, inst):
+        """Каждая головоломка набора — отдельный запрос; ответы склеиваются и оцениваются вместе."""
+        texts, waiting, overruns = [], False, 0
         for k in range(1, task.n_items(inst) + 1):
-            client = self.factory(f"{key}/{k}")  # каждая задача набора — отдельный запрос
+            client = self.factory(f"{key}/{k}")
             msgs = [{"role": "system", "content": TASK_SYSTEM}, {"role": "user", "content": task.prompt_item(inst, k)}]
             try:
                 texts.append(self._ask(client, msgs, f"task_{key}_{k}"))
+                overruns += self.last_usage.get("overruns", 0) or 0
             except NeedResponse as e:
                 self.pending.append(e)
                 texts.append("")
@@ -145,11 +149,44 @@ class HardRun:
         if waiting:
             return None
         text = task.merge_items(texts)
-        with open(os.path.join(self.out, "responses", f"task_{key}.json"), "w", encoding="utf-8") as f:
+        with open(os.path.join(self.out, "responses", f"task_{key}_items.json"), "w", encoding="utf-8") as f:
             f.write(text)
         score, items = task.score(inst, text)
-        self.log(f"  → {task.title}: {score:.0%}")
-        return {"inst": inst, "res": {"score": score, "items": items}, "title": task.title}
+        return {"score": score, "items": items, "overruns": overruns}
+
+    def run_task(self, key):
+        task = TASKS[key]()
+        inst = task_instance(key, self.seed)
+        with open(os.path.join(self.out, f"task_{key}.json"), "w", encoding="utf-8") as f:
+            json.dump(inst, f, ensure_ascii=False)
+        out = {"inst": inst, "title": task.title, "mode": self.puzzles}
+        if self.puzzles == "items":
+            r = self._ask_items(key, task, inst)
+            if r is None:
+                return None
+            out.update(res={"score": r["score"], "items": r["items"]}, answered=True, overruns=r["overruns"])
+        else:
+            msgs = [{"role": "system", "content": TASK_SYSTEM}, {"role": "user", "content": task.prompt(inst)}]
+            text, ov = None, 0
+            try:
+                text = self._ask(self.factory(key), msgs, f"task_{key}")
+                ov = self.last_usage.get("overruns", 0) or 0
+            except NeedResponse as e:
+                self.pending.append(e)
+            diag = self._ask_items(key, task, inst) if self.item_diag else None
+            if text is None or (self.item_diag and diag is None):
+                return None
+            score, items = task.score(inst, text)
+            answered = bool(text.strip())
+            if not answered:
+                for it in items:
+                    it["detail"] = f"нет ответа: лимит вывода исчерпан рассуждениями ({ov} из {ov} попыток)" if ov else "пустой ответ"
+            out.update(res={"score": score, "items": items}, answered=answered, overruns=ov)
+            if diag is not None:
+                out["items_res"] = diag
+        self.log(f"  → {task.title}: {out['res']['score']:.0%}" + ("" if out["answered"] else " (нет ответа)")
+                 + (f"; по одной: {out['items_res']['score']:.0%}" if out.get("items_res") else ""))
+        return out
 
     # ------------------------------------------------------------------
     def execute(self):
@@ -186,14 +223,19 @@ class HardRun:
             if len(phases) > 1:
                 groups.append(("Дом: после исправления", [c for c in final if not c.passed][:12] or final[:6]))
         for k, t in tasks.items():
-            groups.append((f"{t['title']}: {t['res']['score']:.0%}", [
+            groups.append((f"{t['title']}: {t['res']['score']:.0%}" + ("" if t.get("answered", True) else " — нет ответа"), [
                 CheckResult(f"{k[:1].upper()}{i + 1}", it["label"], (TASK_ABILITY[k],), 1.0, it["ok"], it["ok"] >= 0.999, it["detail"], k)
                 for i, it in enumerate(t["res"]["items"])]))
         hs0 = phases[0]["score"] if phases else None
         hs1 = phases[-1]["score"] if phases else None
         stats = [
             f"Дом: попытка 1 — {hs0:.0%}" + (f", после исправления — {hs1:.0%}" if len(phases) > 1 else "") if phases else "Дом: нет",
-            "Задачи: " + ", ".join(f"{t['title']} {t['res']['score']:.0%}" for t in tasks.values()),
+            ("Наборы задач (каждый — одним ответом): " if self.puzzles == "sets" else "Задачи (по одной на запрос): ")
+            + ", ".join(f"{t['title']} {t['res']['score']:.0%}" + ("" if t.get("answered", True) else " (нет ответа)")
+                        for t in tasks.values()),
+            *(["По одной головоломке на запрос (диагностика): "
+               + ", ".join(f"{t['title']} {t['items_res']['score']:.0%}" for t in tasks.values() if t.get("items_res"))]
+              if any(t.get("items_res") for t in tasks.values()) else []),
             f"Запросов: {self.usage['calls']}"
             + (f" · токенов вывода: {self.usage['out'] / 1000:.0f} тыс." if self.usage["out"] else "")
             + (f" · превышений лимита: {self.usage['overruns']}" if self.usage["overruns"] else "")
@@ -216,13 +258,16 @@ def manual_factory(folder):
 
 def save_summary(s, out_dir):
     data = {k: v for k, v in s.items() if k not in ("phases", "tasks", "checks_groups")}
+    data["track"] = "pro"
     data["phases"] = []
     for i, p in enumerate(s["phases"]):
         d = {k: v for k, v in p.items() if k not in ("scene", "checks")}
         d["checks"] = [c.to_dict() for c in p["checks"]]
         d["n_prims"] = len(p["scene"].objects) if p["scene"] is not None else 0
         data["phases"].append(d)
-    data["tasks"] = {k: {"title": t["title"], "score": t["res"]["score"], "items": t["res"]["items"]} for k, t in s["tasks"].items()}
+    data["tasks"] = {k: {"title": t["title"], "mode": t.get("mode"), "answered": t.get("answered", True),
+                         "overruns": t.get("overruns", 0), "score": t["res"]["score"], "items": t["res"]["items"],
+                         "items_diag": t.get("items_res")} for k, t in s["tasks"].items()}
     with open(os.path.join(out_dir, "run.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=1, default=str)
     with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8") as f:
@@ -249,10 +294,21 @@ def report(s):
             L.append(f"| {'✅' if c.passed else '❌'} | {c.id} {c.name} | {c.score:.0%} | {c.detail.replace('|', '/')} |")
         L.append("")
     for k, t in s["tasks"].items():
-        L += [f"## {t['title']} — {t['res']['score']:.0%}", "", "| | Пункт | Оценка | Детали |", "|---|---|---|---|"]
+        mode = "набор одним ответом" if t.get("mode") == "sets" else "по одной головоломке на запрос"
+        L += [f"## {t['title']} — {t['res']['score']:.0%} ({mode})", ""]
+        if not t.get("answered", True):
+            L += [f"Ответа нет: все попытки ({t.get('overruns', 0)}) исчерпали лимит вывода рассуждениями.", ""]
+        L += ["| | Пункт | Оценка | Детали |", "|---|---|---|---|"]
         for it in t["res"]["items"]:
             L.append(f"| {'✅' if it['ok'] >= 0.999 else ('🟡' if it['ok'] > 0 else '❌')} | {it['label']} | {it['ok']:.0%} | {it['detail'].replace('|', '/')} |")
         L.append("")
+        if t.get("items_res"):
+            d = t["items_res"]
+            L += [f"Диагностика — каждая головоломка отдельным запросом: **{d['score']:.0%}** (в счёт не идёт)", "",
+                  "| | Пункт | Оценка | Детали |", "|---|---|---|---|"]
+            for it in d["items"]:
+                L.append(f"| {'✅' if it['ok'] >= 0.999 else ('🟡' if it['ok'] > 0 else '❌')} | {it['label']} | {it['ok']:.0%} | {it['detail'].replace('|', '/')} |")
+            L.append("")
     return "\n".join(L)
 
 
@@ -273,7 +329,7 @@ class MockHard:
             return "{}", {"in": 0, "out": 0}, 0.0
         if phase.startswith("house_fix"):
             return as_response(dict(reference_house(), reset=True)), {"in": 0, "out": 0}, 0.0
-        key, item = phase.replace("task_", "").rsplit("_", 1)
+        key, _, item = phase.replace("task_", "").partition("_")
         inst = task_instance(key, self.seed)
         if key == "arc":
             ans = {str(i + 1): p["answer"] for i, p in enumerate(inst["puzzles"])}
@@ -286,6 +342,8 @@ class MockHard:
         else:
             ans = {str(i + 1): ({"stamps": p["stamps"], **p["final"]} if p["kind"] == "sim" else {"moves": p["solution"]})
                    for i, p in enumerate(inst["puzzles"])}
+        if not item:  # набор одним ответом
+            return json.dumps(ans, ensure_ascii=False), {"in": 0, "out": 0}, 0.0
         return json.dumps({"1": ans.get(item, "")}, ensure_ascii=False), {"in": 0, "out": 0}, 0.0
 
 

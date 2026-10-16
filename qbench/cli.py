@@ -106,7 +106,7 @@ def cmd_hard(a):
                                  overrun_retries=a.overrun_retries)
     os.makedirs(out, exist_ok=True)
     print(f"Прогон Pro «{label}» → {out}")
-    run = HR.HardRun(factory, label, out, fix_rounds=a.fix_rounds, seed=a.seed)
+    run = HR.HardRun(factory, label, out, fix_rounds=a.fix_rounds, seed=a.seed, puzzles=a.puzzles, item_diag=a.item_diag)
     try:
         summary = run.execute()
     except HR.Pending as e:
@@ -115,6 +115,9 @@ def cmd_hard(a):
             print(f"  промпт: {p.prompt_path}\n  ответ:  {p.response_path}")
         sys.exit(3)
     HR.save_summary(summary, out)
+    if os.path.abspath(out).startswith(os.path.abspath(a.results) + os.sep):
+        from .runner import update_leaderboard
+        update_leaderboard(a.results)
     print(f"\nИтог: {summary['overall']:.0%}")
     for k, v in summary["abilities"].items():
         print(f"  {k:12s} {'—' if v is None else f'{v:.0%}'}")
@@ -200,6 +203,10 @@ def main(argv=None):
     h.add_argument("--extra")
     h.add_argument("--fix-rounds", type=int, default=1)
     h.add_argument("--seed", type=int, default=2026, help="seed экземпляров головоломок (2026 — официальный, кэширован)")
+    h.add_argument("--puzzles", choices=["sets", "items"], default="sets",
+                   help="sets — каждый набор головоломок одним ответом (официальный счёт); items — по головоломке на запрос")
+    h.add_argument("--item-diag", action="store_true",
+                   help="при --puzzles sets ещё и спросить каждую головоломку отдельно (диагностика, в счёт не идёт)")
     h.add_argument("--manual", metavar="DIR")
     h.add_argument("--quality", choices=["fast", "normal", "high"], default="normal")
     h.add_argument("--fps", type=int, default=12)

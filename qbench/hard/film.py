@@ -281,7 +281,17 @@ def channel_image(ch, t):
             d.text((40, 120), "задача не запускалась", font=tv.font(16), fill=tv.DIM)
         else:
             fn = {"arc": tv.channel_arc, "optics": tv.channel_optics, "nav": tv.channel_nav, "cube": tv.channel_cube}[name]
-            im = fn(tsk["inst"], tsk["res"], t)
+            res, note, ir = tsk["res"], None, tsk.get("items_res")
+            if not tsk.get("answered", True):
+                note = f"Набор одним ответом: нет ответа ({tsk.get('overruns', 0)} × 128k токенов)"
+                if ir:  # на доске — решения по одной головоломке, в счёт они не идут
+                    res = {"score": res["score"], "items": ir["items"]}
+                    note += f" · по одной: {tv.pct(ir['score'])}"
+            elif ir:
+                note = f"Набор одним ответом: {tv.pct(res['score'])} · по одной: {tv.pct(ir['score'])}"
+            im = fn(tsk["inst"], res, t)
+            if note:
+                im = tv.note_strip(im, note, bad=not tsk.get("answered", True))
     if len(_CH_CACHE) > 400:
         _CH_CACHE.clear()
     _CH_CACHE[key] = im

@@ -73,3 +73,32 @@ def test_mock_pro_run(tmp_path):
     assert s["abilities"]["self_fix"] is not None
     assert 0.5 < s["overall"] <= 1.0
     assert s["phases"][-1]["score"] > 0.99
+
+
+def test_merge_doc_replace_remove_reset():
+    from qbench.hard.dsl import merge_doc
+    a = {"objects": [{"id": "x", "v": 1}, {"id": "y"}], "instances": [{"use": "c", "id": "i1"}], "plan": {"a": 1}}
+    b = merge_doc(a, {"objects": [{"id": "x", "v": 2}, {"id": "z"}], "remove": ["y", "i1"], "plan": {"b": 2}})
+    assert [o["id"] for o in b["objects"]] == ["x", "z"] and b["objects"][0]["v"] == 2
+    assert b["instances"] == [] and b["plan"] == {"a": 1, "b": 2}
+    assert merge_doc(b, {"reset": True, "objects": [{"id": "q"}]})["objects"] == [{"id": "q"}]
+
+
+def test_house_in_parts_equals_whole():
+    from qbench.hard.dsl import parse_house_parts
+    d = reference_house()
+    objs, inst = d.get("objects", []), d.get("instances", [])
+    p1 = {k: v for k, v in d.items() if k not in ("objects", "instances")}
+    p1.update(objects=objs[: len(objs) // 2], instances=inst[: len(inst) // 2])
+    p2 = {"objects": objs[len(objs) // 2:], "instances": inst[len(inst) // 2:]}
+    pr, _ = parse_house_parts([json.dumps(p1), json.dumps(p2)])
+    assert len(pr.scene.objects) == len(build_scene(d).objects)
+    assert all(c.passed for c in run_house(pr))
+
+
+def test_puzzle_modes(tmp_path):
+    s = HardRun(mock_factory(), "Mock", str(tmp_path / "a"), log=lambda *a: None, puzzles="sets", item_diag=True).execute()
+    assert all(t["answered"] and t.get("items_res") for t in s["tasks"].values())
+    s2 = HardRun(mock_factory(), "Mock", str(tmp_path / "b"), log=lambda *a: None, puzzles="items").execute()
+    assert {k: round(t["res"]["score"], 3) for k, t in s2["tasks"].items()} == \
+           {k: round(t["items_res"]["score"], 3) for k, t in s["tasks"].items()}

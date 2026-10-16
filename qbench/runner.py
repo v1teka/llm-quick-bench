@@ -228,15 +228,23 @@ def update_leaderboard(results_dir):
                 continue
             rows.append((d["overall"], d, os.path.relpath(root, results_dir)))
     rows.sort(key=lambda r: -r[0])
-    head = "| # | Модель | Итог | " + " | ".join(n for _, n in C.ABILITIES) + " | Дата | Видео |"
-    L = ["# Лидерборд llm-quick-bench · Дом-3D", "", head, "|" + "---|" * (len(C.ABILITIES) + 5)]
-    for i, (tot, d, rel) in enumerate(rows, 1):
-        vals = " | ".join("—" if d["abilities"].get(k) is None else f"{d['abilities'][k]:.0%}" for k, _ in C.ABILITIES)
-        L.append(f"| {i} | {d['model']} | **{tot:.0%}** | {vals} | {d['date'][:10]} | [gif]({rel}/video.gif) |")
+    from .hard import config as HC
+    L = ["# Лидерборд llm-quick-bench · Дом-3D", ""]
+    for title, abil, sel in (("Pro: детальный дом + 4 набора головоломок", HC.ABILITIES, lambda d: d.get("track") == "pro"),
+                             ("Базовый трек", C.ABILITIES, lambda d: d.get("track") != "pro")):
+        part = [r for r in rows if sel(r[1])]
+        if not part:
+            continue
+        L += [f"## {title}", "", "| # | Модель | Итог | " + " | ".join(n for _, n in abil) + " | Дата | Видео |",
+              "|" + "---|" * (len(abil) + 5)]
+        for i, (tot, d, rel) in enumerate(part, 1):
+            vals = " | ".join("—" if d["abilities"].get(k) is None else f"{d['abilities'][k]:.0%}" for k, _ in abil)
+            L.append(f"| {i} | {d['model']} | **{tot:.0%}** | {vals} | {d['date'][:10]} | [gif]({rel}/video.gif) |")
+        L.append("")
     os.makedirs(results_dir, exist_ok=True)
     path = os.path.join(results_dir, "LEADERBOARD.md")
     with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(L) + "\n")
+        f.write("\n".join(L).rstrip() + "\n")
     return path
 
 

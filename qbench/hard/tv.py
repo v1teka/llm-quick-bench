@@ -30,6 +30,21 @@ def _base(W, H, ch, title, score):
     return im, d, s
 
 
+def note_strip(im, text, bad=False):
+    """Полоса-примечание внизу канала (например, «набор одним ответом: нет ответа · по одной: 100%»)."""
+    im = im.copy()
+    W, H = im.size
+    s = W / 480
+    h = int(22 * s)
+    ov = Image.new("RGB", (W, h), (30, 12, 14) if bad else (18, 22, 30))
+    im.paste(ov, (0, H - h))
+    d = ImageDraw.Draw(im)
+    f = font(int(11 * s), True)
+    t = _shorten(d, text, f, W - int(16 * s))
+    d.text((int(8 * s), H - h + int(4 * s)), t, font=f, fill=BAD if bad else DIM)
+    return im
+
+
 def _grid_img(rows, cell, maxw=None, maxh=None):
     g = [[int(ch) for ch in r] for r in rows] if rows else [[0]]
     h, w = len(g), len(g[0])
