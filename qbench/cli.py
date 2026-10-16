@@ -194,7 +194,7 @@ def main(argv=None):
     pp = sub.add_parser("prompt", help="напечатать задание (для ручного прогона в чате)")
     pp.set_defaults(fn=cmd_prompt)
 
-    h = sub.add_parser("pro", help="жёсткий набор «Дом-3D Pro»: детальный дом + 4 задачи на телевизорах")
+    h = sub.add_parser("pro", help="жёсткий набор «Дом-3D Pro»: детальный дом + 6 наборов задач на телевизорах")
     h.add_argument("--model", required=True, help="id модели у провайдера или mock")
     h.add_argument("--label")
     h.add_argument("--base-url")

@@ -304,15 +304,20 @@ def channel_code(inst, res, t, W=480, H=270):
         sc = pct(it["ok"]) if k_show >= n else ""
         f = font(int(11 * s), True)
         d.text((W - int(12 * s) - d.textlength(sc, font=f), y), sc, font=f, fill=score_color(it["ok"]))
-        cw = int(min(26 * s, (W - 24 * s) / max(n, 1) - 3 * s))
+        parts = it.get("parts")
+        cw = int(min((80 if parts else 26) * s, (W - 24 * s) / max(n, 1) - 3 * s))
         for j in range(n):
             x = int(12 * s) + j * (cw + int(3 * s))
             st = tests[j] if j < len(tests) else None
             fill = cols.get(st, (60, 64, 76)) if j < k_show else (40, 44, 55)
             d.rounded_rectangle([x, y + int(17 * s), x + cw, y + int(17 * s) + int(14 * s)], radius=int(3 * s), fill=fill)
             if j < k_show and st:
+                lab = f"{st} · {pct(parts[j])}" if parts and j < len(parts) else st
                 ft = font(int(7 * s), True)
-                d.text((x + (cw - d.textlength(st, font=ft)) / 2, y + int(19 * s)), st, font=ft, fill=BG)
+                d.text((x + (cw - d.textlength(lab, font=ft)) / 2, y + int(19 * s)), lab, font=ft, fill=BG)
+        if parts and k_show >= n:
+            d.text((int(12 * s), y + int(35 * s)), _shorten(d, it["detail"], font(int(8 * s)), W - int(24 * s)),
+                   font=font(int(8 * s)), fill=DIM)
         if not tests and k_show >= n:
             d.text((int(12 * s), y + int(35 * s)), it["detail"], font=font(int(9 * s)), fill=DIM)
         y += rowh
@@ -364,8 +369,9 @@ def channel_construct(inst, res, t, W=480, H=270):
                     rr = (2.5 if z >= 0 else 1.8) * s
                     d.ellipse([cx + x * R - rr, cy - y * R - rr, cx + x * R + rr, cy - y * R + rr], fill=col)
             elif i == 2 and a:
-                side = min(bw, bh)
+                side = min(bw, bh) * 0.78
                 ox = bx + (bw - side) / 2
+                by = by + (bh - side) / 2
                 d.rectangle([ox, by, ox + side, by + side], outline=(90, 94, 108))
                 import itertools as _it
                 import math as _m
@@ -426,18 +432,20 @@ def channel_summary(summary, t, W=480, H=270):
     items = [(name, summary["abilities"].get(key)) for key, name in C.ABILITIES]
     grow = min(1.0, 0.15 + t * 1.5)
     shown = [(n, (v * grow if v is not None else None)) for n, v in items]
-    im = radar16(im, int(W * 0.27), int(H * 0.58), int(H * 0.27), shown, s)
+    im = radar16(im, int(W * 0.29), int(H * 0.58), int(H * (0.27 if len(shown) <= 12 else 0.19)), shown, s)
     d = ImageDraw.Draw(im)
-    x0, y = int(W * 0.56), int(38 * s)
-    bw = int(W * 0.40)
+    wide = len(shown) > 12
+    x0, y = int(W * (0.6 if wide else 0.56)), int(38 * s)
+    bw = int(W * (0.37 if wide else 0.40))
+    fs = 9 if len(shown) <= 12 else 8
     for name, v in shown:
-        d.text((x0, y), name, font=font(int(9 * s)), fill=TEXT if v is not None else DIM)
+        d.text((x0, y), name, font=font(int(fs * s)), fill=TEXT if v is not None else DIM)
         tv = pct(v)
-        d.text((x0 + bw - d.textlength(tv, font=font(int(9 * s), True)), y), tv, font=font(int(9 * s), True), fill=score_color(v))
-        yb = y + int(12 * s)
-        d.rectangle([x0, yb, x0 + bw, yb + int(3 * s)], fill=PANEL)
+        d.text((x0 + bw - d.textlength(tv, font=font(int(fs * s), True)), y), tv, font=font(int(fs * s), True), fill=score_color(v))
+        yb = y + int((fs + 3) * s)
+        d.rectangle([x0, yb, x0 + bw, yb + int(2 * s)], fill=PANEL)
         if v:
-            d.rectangle([x0, yb, x0 + int(bw * v), yb + int(3 * s)], fill=score_color(v))
+            d.rectangle([x0, yb, x0 + int(bw * v), yb + int(2 * s)], fill=score_color(v))
         y += int(min(18.5, (H / s - 44) / max(1, len(shown))) * s)
     return im
 
