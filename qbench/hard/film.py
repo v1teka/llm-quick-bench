@@ -274,13 +274,14 @@ def channel_image(ch, t):
     if ch == 5:
         im = tv.channel_summary(G["summary"], t)
     else:
-        name = {1: "arc", 2: "optics", 3: "nav", 4: "cube"}[ch]
+        name = {1: "arc", 2: "optics", 3: "nav", 4: "matryoshka" if "matryoshka" in tasks else "cube"}[ch]
         tsk = tasks.get(name)
         if tsk is None:
-            im, d, s = tv._base(480, 270, ch, {1: "Логика", 2: "Оптика", 3: "Навигация", 4: "Кубик"}[ch], None)
+            im, d, s = tv._base(480, 270, ch, {1: "Логика", 2: "Оптика", 3: "Навигация", 4: "Матрёшка"}[ch], None)
             d.text((40, 120), "задача не запускалась", font=tv.font(16), fill=tv.DIM)
         else:
-            fn = {"arc": tv.channel_arc, "optics": tv.channel_optics, "nav": tv.channel_nav, "cube": tv.channel_cube}[name]
+            fn = {"arc": tv.channel_arc, "optics": tv.channel_optics, "nav": tv.channel_nav, "cube": tv.channel_cube,
+                  "matryoshka": tv.channel_matryoshka}[name]
             res, note, ir = tsk["res"], None, tsk.get("items_res")
             if not tsk.get("answered", True):
                 note = f"Набор одним ответом: нет ответа ({tsk.get('overruns', 0)} × 128k токенов)"
@@ -424,8 +425,9 @@ def build_film(summary, scene, tasks, out_dir, quality="normal", fps=12, workers
     cur = p_door
     cur_dir = np.array([0, -1.0, 0])
     step = 2.1 / fps
-    ch_names = {1: "Логика", 2: "Оптика", 3: "Навигация", 4: "Кубик", 5: "Итоги бенчмарка"}
-    ch_scores = {1: _ts(tasks, "arc"), 2: _ts(tasks, "optics"), 3: _ts(tasks, "nav"), 4: _ts(tasks, "cube"), 5: summary["overall"]}
+    k4 = "matryoshka" if "matryoshka" in tasks else "cube"
+    ch_names = {1: "Логика", 2: "Оптика", 3: "Навигация", 4: "Матрёшка" if k4 == "matryoshka" else "Кубик", 5: "Итоги бенчмарка"}
+    ch_scores = {1: _ts(tasks, "arc"), 2: _ts(tasks, "optics"), 3: _ts(tasks, "nav"), 4: _ts(tasks, k4), 5: summary["overall"]}
     for k, vp in enumerate(vps):
         ch = k + 1
         if vp is None:

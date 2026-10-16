@@ -19,6 +19,7 @@ from .dsl import parse_house_parts
 from .house_checks import run_house, feedback, CHECKS
 from .tasks.arc import ArcTask
 from .tasks.cube import CubeTaskHarder
+from .tasks.matryoshka import MatryoshkaTask
 from .tasks.nav import NavTaskHard
 from .tasks.optics import OpticsTaskHarder
 
@@ -28,7 +29,9 @@ TASKS = {
     "optics": lambda: OpticsTaskHarder(difficulty=3),
     "nav": lambda: NavTaskHard(difficulty=3),
     "cube": lambda: CubeTaskHarder(difficulty=3),
+    "matryoshka": lambda: MatryoshkaTask(difficulty=5),
 }
+DEFAULT_TASKS = ("arc", "optics", "nav", "matryoshka")
 DATA = os.path.join(os.path.dirname(__file__), "data")
 
 
@@ -43,7 +46,7 @@ def task_instance(key, seed):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(inst, f, ensure_ascii=False)
     return inst
-TASK_ABILITY = {"arc": "logic", "optics": "simulation", "nav": "plan_search", "cube": "rotation"}
+TASK_ABILITY = {"arc": "logic", "optics": "simulation", "nav": "plan_search", "cube": "rotation", "matryoshka": "olympiad"}
 TASK_SYSTEM = "Ты внимательно решаешь задачи и отвечаешь строго в требуемом формате. " + P.BUDGET
 
 
@@ -52,7 +55,7 @@ class Pending(Exception):
 
 
 class HardRun:
-    def __init__(self, client_factory, model_label, out_dir, fix_rounds=1, tasks=("arc", "optics", "nav", "cube"),
+    def __init__(self, client_factory, model_label, out_dir, fix_rounds=1, tasks=DEFAULT_TASKS,
                  seed=SEED, log=print, puzzles="sets", item_diag=False):
         self.factory = client_factory  # conv_name -> client
         self.model = model_label
@@ -154,12 +157,36 @@ class HardRun:
         score, items = task.score(inst, text)
         return {"score": score, "items": items, "overruns": overruns}
 
+    def _run_multi(self, key, task, inst, out):
+        """Задача из нескольких сообщений одного диалога (матрёшка: по слою на сообщение)."""
+        client = self.factory(key)
+        msgs = [{"role": "system", "content": TASK_SYSTEM}]
+        texts, ov = [], 0
+        for j, p in enumerate(task.turns(inst)):
+            msgs.append({"role": "user", "content": p})
+            try:
+                t = self._ask(client, msgs, f"task_{key}_{task.turn_names[j]}")
+            except NeedResponse as e:
+                self.pending.append(e)
+                return None
+            ov += self.last_usage.get("overruns", 0) or 0
+            msgs.append({"role": "assistant", "content": t})
+            texts.append(t)
+        text = "\n\n".join(texts)
+        score, items = task.score(inst, text)
+        out.update(res={"score": score, "items": items}, answered=any(x.strip() for x in texts), overruns=ov, mode="layers")
+        self.log(f"  → {task.title}: {score:.0%} (по слоям {items[0]['summary']['by_layer']:.0%}, "
+                 f"цепочка {items[0]['summary']['chain']}/6)")
+        return out
+
     def run_task(self, key):
         task = TASKS[key]()
         inst = task_instance(key, self.seed)
         with open(os.path.join(self.out, f"task_{key}.json"), "w", encoding="utf-8") as f:
             json.dump(inst, f, ensure_ascii=False)
         out = {"inst": inst, "title": task.title, "mode": self.puzzles}
+        if getattr(task, "multi_turn", False):
+            return self._run_multi(key, task, inst, out)
         if self.puzzles == "items":
             r = self._ask_items(key, task, inst)
             if r is None:
@@ -331,6 +358,12 @@ class MockHard:
             return as_response(dict(reference_house(), reset=True)), {"in": 0, "out": 0}, 0.0
         key, _, item = phase.replace("task_", "").partition("_")
         inst = task_instance(key, self.seed)
+        if key == "matryoshka":
+            ch = dict(inst["chain"])
+            ch["L2"] += 1  # ошибка в слое 2 для наглядности
+            if item == "L0":
+                return json.dumps({"L0": {"moves": ch["L0"]}}), {"in": 0, "out": 0}, 0.0
+            return json.dumps({item: ch[item]}), {"in": 0, "out": 0}, 0.0
         if key == "arc":
             ans = {str(i + 1): p["answer"] for i, p in enumerate(inst["puzzles"])}
             ans["2"] = ["0"]  # одна ошибка для наглядности

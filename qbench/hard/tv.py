@@ -236,6 +236,59 @@ def channel_cube(inst, res, t, W=480, H=270):
     return im
 
 
+def channel_matryoshka(inst, res, t, W=480, H=270):
+    """Шесть вложенных слоёв (5 → 0) раскрываются по очереди, справа — маршрут кубика слоя 0."""
+    from .tasks.cube import run2
+    im, d, s = _base(W, H, 4, "Матрёшка · 5 слоёв + кубик", res["score"])
+    items = res["items"]
+    n_show = min(6, int(t * 7.5) + 1)
+    x0, y0 = int(10 * s), int(38 * s)
+    bw, bh = int(W * 0.52), int(29 * s)
+    for i, it in enumerate(items[:6]):
+        ind = int(i * 7 * s)
+        x, y = x0 + ind, y0 + i * (bh + int(4 * s))
+        shown = i < n_show
+        ok = it["ok"]
+        col = (GOOD if ok >= 0.999 else (MID if ok > 0 else BAD)) if shown else (60, 64, 76)
+        d.rounded_rectangle([x, y, x0 + bw - ind, y + bh], radius=int(9 * s), outline=col, width=max(1, int(2 * s)),
+                            fill=(20, 23, 31))
+        d.text((x + int(8 * s), y + int(3 * s)), it["label"], font=font(int(10 * s), True), fill=TEXT if shown else DIM)
+        if shown:
+            got = it.get("got")
+            g = (got if isinstance(got, str) else ("—" if got is None else f"{got:,}".replace(",", " ")))
+            d.text((x + int(8 * s), y + int(15 * s)), _shorten(d, f"ответ: {g}", font(int(9 * s)), bw - ind - 60 * s),
+                   font=font(int(9 * s)), fill=DIM)
+            mark = "✓" if ok >= 0.999 else ("½" if ok > 0 else "✗")
+            d.text((x0 + bw - ind - int(20 * s), y + int(6 * s)), mark, font=font(int(14 * s), True), fill=col)
+    # кубик слоя 0
+    board = inst["board"]
+    mv = items[5].get("got") or "" if len(items) > 5 else ""
+    _, _, trace = run2(board, mv)
+    Hh, Ww = len(board), len(board[0])
+    cell = int(min((W * 0.4) / Ww, (H - 70 * s) / Hh))
+    ox, oy = int(W * 0.58), int(40 * s)
+    for r in range(Hh):
+        for c in range(Ww):
+            ch = board[r][c]
+            colc = (10, 10, 12) if ch == "#" else ((60, 130, 70) if ch == "G" else (40, 44, 55))
+            d.rectangle([ox + c * cell, oy + r * cell, ox + (c + 1) * cell - 2, oy + (r + 1) * cell - 2], fill=colc)
+            if ch in "@%S":
+                d.text((ox + c * cell + cell * 0.28, oy + r * cell + cell * 0.12), ch, font=font(int(cell * 0.55), True), fill=TEXT)
+    frac = max(0.0, min(1.0, (t - 0.55) / 0.4))
+    k = max(1, int(len(trace) * frac)) if n_show >= 6 else 1
+    pts = [(ox + c * cell + cell / 2, oy + r * cell + cell / 2) for r, c, _, _ in trace[:k]]
+    if len(pts) > 1:
+        d.line(pts, fill=ACCENT, width=max(2, int(2 * s)))
+    r, c, f, _ = trace[k - 1]
+    d.rectangle([ox + c * cell + 3, oy + r * cell + 3, ox + (c + 1) * cell - 5, oy + (r + 1) * cell - 5],
+                fill=CUBE_COLORS.get(f["top"], (200, 200, 200)), outline=(255, 255, 255))
+    summ = items[0].get("summary", {}) if items else {}
+    d.text((ox, oy + Hh * cell + int(6 * s)),
+           f"по слоям {pct(summ.get('by_layer', 0))} · цепочка {summ.get('chain', 0)}/6",
+           font=font(int(10 * s), True), fill=TEXT)
+    return im
+
+
 def radar16(im, cx, cy, R, items, s):
     n = len(items)
     d = ImageDraw.Draw(im)
