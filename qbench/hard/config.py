@@ -63,5 +63,7 @@ ABILITIES = [
     ("simulation", "Симуляция"),
     ("plan_search", "Поиск плана"),
     ("olympiad", "Матрёшка"),
+    ("coding", "Программирование"),
+    ("construction", "Конструкции"),
 ]
 ABILITY_NAMES = dict(ABILITIES)

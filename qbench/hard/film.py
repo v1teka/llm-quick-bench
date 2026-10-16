@@ -265,6 +265,10 @@ def letterbox(ch_img, W, H):
     return bg
 
 
+# Каналы 6 и 7 показывает пятый телевизор перед итогами (в доме пять телевизоров)
+EXTRA_CH = {6: ("code", "Программирование", "channel_code"), 7: ("construct", "Конструкции", "channel_construct")}
+
+
 def channel_image(ch, t):
     t = round(float(t), 3)
     key = (ch, t)
@@ -273,6 +277,22 @@ def channel_image(ch, t):
     tasks = G["tasks"]
     if ch == 5:
         im = tv.channel_summary(G["summary"], t)
+    elif ch in EXTRA_CH:
+        name, title, fn = EXTRA_CH[ch]
+        tsk = tasks.get(name)
+        if tsk is None:
+            im, d, s = tv._base(480, 270, ch, title, None)
+            d.text((40, 120), "задача не запускалась", font=tv.font(16), fill=tv.DIM)
+        else:
+            res, ir = tsk["res"], tsk.get("items_res")
+            if not tsk.get("answered", True) and ir:
+                res = {"score": res["score"], "items": ir["items"]}
+            im = getattr(tv, fn)(tsk["inst"], res, t)
+            if not tsk.get("answered", True):
+                im = tv.note_strip(im, f"Набор одним ответом: нет ответа ({tsk.get('overruns', 0)} × 128k токенов)"
+                                   + (f" · по одной: {tv.pct(ir['score'])}" if ir else ""), bad=True)
+            elif ir:
+                im = tv.note_strip(im, f"Набор одним ответом: {tv.pct(tsk['res']['score'])} · по одной: {tv.pct(ir['score'])}")
     else:
         name = {1: "arc", 2: "optics", 3: "nav", 4: _k4(tasks)}[ch]
         tsk = tasks.get(name)
@@ -486,6 +506,13 @@ def build_film(summary, scene, tasks, out_dir, quality="normal", fps=12, workers
             jobs.append({"kind": "scene", "eye": cur, "tgt": look, "fov": 58, "exposure": _expo(cur), "tv_t": {ch: 0.45},
                          "blend": ((i + 1) / nb_, ch, 0.45), "caption": f"Канал {ch}: {ch_names[ch]}", "score": ch_scores[ch],
                          "step": f"ТВ {ch}"})
+        if ch == 5:  # пятый телевизор сначала показывает каналы 6 и 7, затем итоги
+            for xc, (name, title, _) in EXTRA_CH.items():
+                if name not in tasks:
+                    continue
+                for i in range(int(3.4 * fps)):
+                    jobs.append({"kind": "channel", "ch": xc, "t": i / int(3.4 * fps), "caption": f"Канал {xc}: {title}",
+                                 "score": _ts(tasks, name), "step": "ТВ 5"})
         hold = int((3.4 if ch < 5 else 4.5) * fps)
         for i in range(hold):
             jobs.append({"kind": "channel", "ch": ch, "t": 0.45 + 0.55 * i / hold, "caption": f"Канал {ch}: {ch_names[ch]}",

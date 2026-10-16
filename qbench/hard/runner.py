@@ -18,6 +18,8 @@ from . import prompts as P
 from .dsl import parse_house_parts
 from .house_checks import run_house, feedback, CHECKS
 from .tasks.arc import ArcTask
+from .tasks.code import CodeTask
+from .tasks.construct import ConstructTask
 from .tasks.cube import CubeTaskHarder
 from .tasks.matryoshka import MatryoshkaTask
 from .tasks.nav import NavTaskHard
@@ -31,8 +33,10 @@ TASKS = {
     "cube": lambda: CubeTaskHarder(difficulty=3),
     "matryoshka": lambda: MatryoshkaTask(difficulty=5, version=2),
     "matryoshka1": lambda: MatryoshkaTask(difficulty=5, version=1),  # классические слои (история)
+    "code": CodeTask,
+    "construct": ConstructTask,
 }
-DEFAULT_TASKS = ("arc", "optics", "nav", "matryoshka")
+DEFAULT_TASKS = ("arc", "optics", "nav", "matryoshka", "code", "construct")
 DATA = os.path.join(os.path.dirname(__file__), "data")
 
 
@@ -49,7 +53,7 @@ def task_instance(key, seed):
         json.dump(inst, f, ensure_ascii=False)
     return inst
 TASK_ABILITY = {"arc": "logic", "optics": "simulation", "nav": "plan_search", "cube": "rotation", "matryoshka": "olympiad",
-                "matryoshka1": "olympiad"}
+                "matryoshka1": "olympiad", "code": "coding", "construct": "construction"}
 TASK_SYSTEM = "Ты внимательно решаешь задачи и отвечаешь строго в требуемом формате. " + P.BUDGET
 
 
@@ -320,7 +324,7 @@ def manual_factory(folder):
     return make
 
 
-PROTOCOL = "v4"  # дом частями · наборы одним ответом · матрёшка v2 одним ответом
+PROTOCOL = "v5"  # дом частями · наборы одним ответом · матрёшка v2 · программирование и конструкции
 
 
 def protocol_of(d):
@@ -328,20 +332,24 @@ def protocol_of(d):
     if d.get("protocol"):
         return d["protocol"]
     t = d.get("tasks", {})
+    if "matryoshka" in t and ("code" in t or "construct" in t):
+        return "v5"
     if "matryoshka1" in t or "matryoshka" in t:
         return "v3"  # матрёшка v1, по слою на сообщение
     return "v2"  # набор «Кубик» вместо матрёшки
 
 
 PROTOCOL_NAMES = {"v2": "наборы ARC, оптика, навигация, кубик", "v3": "матрёшка v1 (классические слои, по слою на сообщение)",
-                  "v4": "матрёшка v2 (IMO 2026 и др., одним ответом)"}
+                  "v4": "матрёшка v2 (IMO 2026 и др., одним ответом)",
+                  "v5": "+ программирование на скрытых тестах и открытые конструкции"}
 
 
 def save_summary(s, out_dir):
     data = {k: v for k, v in s.items() if k not in ("phases", "tasks", "checks_groups")}
     data["track"] = "pro"
     t = s.get("tasks", {})
-    data["protocol"] = PROTOCOL if "matryoshka" in t and t["matryoshka"]["inst"].get("version", 1) >= 2 else \
+    data["protocol"] = (PROTOCOL if ("code" in t or "construct" in t) else "v4") \
+        if "matryoshka" in t and t["matryoshka"]["inst"].get("version", 1) >= 2 else \
         ("v3" if any(k.startswith("matryoshka") for k in t) else "v2")
     data["phases"] = []
     for i, p in enumerate(s["phases"]):
@@ -426,6 +434,18 @@ class MockHard:
             if item == "L0":
                 return json.dumps({"L0": {"moves": ch["L0"]}}), {"in": 0, "out": 0}, 0.0
             return json.dumps({item: ch[item]}), {"in": 0, "out": 0}, 0.0
+        if key == "code":
+            from .tasks.code import REF
+            progs = REF if not item else [REF[int(item) - 1]]
+            text = "\n\n".join(f"```python\n# задача {k}\n{c}```" for k, c in enumerate(progs, 1))
+            if not item:  # ошибка в задаче 2 для наглядности: программа без ответа
+                text = text.replace("print(ans)", "print(0)")
+            return text, {"in": 0, "out": 0}, 0.0
+        if key == "construct":
+            ans = mock_constructions()
+            if not item:
+                return json.dumps(ans), {"in": 0, "out": 0}, 0.0
+            return json.dumps({"1": ans[item]}), {"in": 0, "out": 0}, 0.0
         if key == "arc":
             ans = {str(i + 1): p["answer"] for i, p in enumerate(inst["puzzles"])}
             ans["2"] = ["0"]  # одна ошибка для наглядности
@@ -440,6 +460,31 @@ class MockHard:
         if not item:  # набор одним ответом
             return json.dumps(ans, ensure_ascii=False), {"in": 0, "out": 0}, 0.0
         return json.dumps({"1": ans.get(item, "")}, ensure_ascii=False), {"in": 0, "out": 0}, 0.0
+
+
+def mock_constructions():
+    """Простые корректные конструкции: парабола по модулю 23, сеть Бэтчера, решётка, лексикод."""
+    def merge(lo, n, r):
+        m = r * 2
+        if m < n:
+            yield from merge(lo, n, m)
+            yield from merge(lo + r, n, m)
+            for i in range(lo + r, lo + n - r, m):
+                yield (i, i + r)
+        else:
+            yield (lo, lo + r)
+
+    def net(lo, n):
+        if n > 1:
+            yield from net(lo, n // 2)
+            yield from net(lo + n // 2, n // 2)
+            yield from merge(lo, n, 1)
+    words = []
+    for v in range(1024):
+        if all(bin(v ^ w).count("1") >= 4 for w in words):
+            words.append(v)
+    return {"1": [[x, x * x % 23] for x in range(23)], "2": [list(c) for c in net(0, 16) if c[1] < 12],
+            "3": [[i / 3, j / 3] for i in range(4) for j in range(3)][:10], "4": [format(w, "010b") for w in words]}
 
 
 def mock_factory():

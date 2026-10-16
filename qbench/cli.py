@@ -211,7 +211,7 @@ def main(argv=None):
     h.add_argument("--item-diag", action="store_true",
                    help="при --puzzles sets ещё и спросить каждую головоломку отдельно (диагностика, в счёт не идёт)")
     h.add_argument("--manual", metavar="DIR")
-    h.add_argument("--tasks", help="наборы задач через запятую (по умолчанию arc,optics,nav,matryoshka; "
+    h.add_argument("--tasks", help="наборы задач через запятую (по умолчанию arc,optics,nav,matryoshka,code,construct; "
                                    "matryoshka1 — первая, классическая версия матрёшки)")
     h.add_argument("--quality", choices=["fast", "normal", "high"], default="normal")
     h.add_argument("--fps", type=int, default=12)

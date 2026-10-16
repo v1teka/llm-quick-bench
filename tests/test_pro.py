@@ -51,6 +51,8 @@ def test_dsl_nested_rotation_and_grid():
 
 def test_task_instances_perfect_answers():
     for key in TASKS:
+        if key in ("code", "construct"):  # свои тесты ниже
+            continue
         inst = task_instance(key, 2026)
         t = TASKS[key]()
         if key == "arc":
@@ -139,3 +141,36 @@ def test_matryoshka_v2_layers():
     s, items = t.score(inst, text)
     summ = items[0]["summary"]
     assert summ["chain"] == 1 and abs(summ["by_layer"] - 5 / 6) < 1e-9
+
+
+def test_code_reference_matches_brute_and_scores_full():
+    import random
+    from qbench.hard.tasks import code as K
+    for k in range(4):
+        inp, want = K.SAMPLES[k]
+        assert K.same(K.BRUTE[k](inp), want)
+        rng = random.Random(k)
+        for _ in range(15):
+            inp = K.GENS[k](rng, "small")
+            st, out = K.run_code(K.REF[k], inp, 30)
+            assert st == "OK" and K.same(out, K.BRUTE[k](inp)), (k, inp[:120])
+    t = TASKS["code"]()
+    inst = task_instance("code", 2026)
+    text = "\n\n".join(f"```python\n# задача {k}\n{c}```" for k, c in enumerate(K.REF, 1))
+    s, items = t.score(inst, text)
+    assert s == 1.0, [it["detail"] for it in items]
+    naive = "```python\n# задача 3\nn=int(input());from math import gcd\n" \
+            "print(sum(gcd(i,j)**2 for i in range(1,n+1) for j in range(1,n+1))%998244353)\n```"
+    s, items = t.score(inst, naive)
+    assert 0 < items[2]["ok"] < 1 and "TL" in items[2]["detail"] and items[0]["ok"] == 0
+
+
+def test_constructions_scoring():
+    from qbench.hard.runner import mock_constructions
+    from qbench.hard.tasks.construct import item_score
+    m = mock_constructions()
+    assert abs(item_score(0, m["1"])[0] - 23 / 48) < 1e-9
+    assert abs(item_score(1, m["2"])[0] - 6 / 9) < 1e-9          # Бэтчер: 42 компаратора
+    assert item_score(1, m["2"][:-1])[0] == 0                       # без последнего компаратора не сортирует
+    assert item_score(2, m["3"])[0] == 0 and abs(item_score(3, m["4"])[0] - 0.6) < 1e-9
+    assert item_score(0, m["1"] + [[23, 23]])[0] == 0              # (0,0), (1,1), (23,23) на одной прямой

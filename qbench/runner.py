@@ -232,7 +232,7 @@ def update_leaderboard(results_dir):
     L = ["# Лидерборд llm-quick-bench · Дом-3D", ""]
     from .hard.runner import PROTOCOL, PROTOCOL_NAMES, protocol_of
     sections = (
-        (f"Pro: детальный дом + 4 набора головоломок (протокол {PROTOCOL}: {PROTOCOL_NAMES[PROTOCOL]})", HC.ABILITIES,
+        (f"Pro: детальный дом + наборы задач (протокол {PROTOCOL}: {PROTOCOL_NAMES[PROTOCOL]})", HC.ABILITIES,
          lambda d: d.get("track") == "pro" and protocol_of(d) == PROTOCOL),
         ("Pro: прежние версии протокола", HC.ABILITIES, lambda d: d.get("track") == "pro" and protocol_of(d) != PROTOCOL),
         ("Базовый трек", C.ABILITIES, lambda d: d.get("track") != "pro"))

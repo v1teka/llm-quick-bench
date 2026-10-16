@@ -1,0 +1,10 @@
+{
+ "out": 65839,
+ "overruns": 0,
+ "classifier_stops": 0,
+ "seconds": 529.4,
+ "tools": [
+  "Read"
+ ],
+ "agent": "subagent (Claude Code), без инструментов"
+}

@@ -289,6 +289,108 @@ def channel_matryoshka(inst, res, t, W=480, H=270):
     return im
 
 
+def channel_code(inst, res, t, W=480, H=270):
+    """Программирование: по задаче — ряд скрытых тестов, клетки загораются по ходу «прогона»."""
+    im, d, s = _base(W, H, 6, "Программирование · скрытые тесты", res["score"])
+    cols = {"OK": GOOD, "WA": BAD, "TL": MID, "RE": (190, 90, 220)}
+    items = res["items"]
+    y = int(40 * s)
+    rowh = int((H - 70 * s) / max(1, len(items)))
+    for i, it in enumerate(items):
+        tests = it.get("tests") or []
+        n = len(tests) or (inst["problems"][i]["n_tests"] if i < len(inst.get("problems", [])) else 11)
+        k_show = int(n * max(0.0, min(1.0, t * 1.6 - i * 0.12)))
+        d.text((int(12 * s), y), f"{i + 1}. {it['label']}", font=font(int(11 * s), True), fill=TEXT)
+        sc = pct(it["ok"]) if k_show >= n else ""
+        f = font(int(11 * s), True)
+        d.text((W - int(12 * s) - d.textlength(sc, font=f), y), sc, font=f, fill=score_color(it["ok"]))
+        cw = int(min(26 * s, (W - 24 * s) / max(n, 1) - 3 * s))
+        for j in range(n):
+            x = int(12 * s) + j * (cw + int(3 * s))
+            st = tests[j] if j < len(tests) else None
+            fill = cols.get(st, (60, 64, 76)) if j < k_show else (40, 44, 55)
+            d.rounded_rectangle([x, y + int(17 * s), x + cw, y + int(17 * s) + int(14 * s)], radius=int(3 * s), fill=fill)
+            if j < k_show and st:
+                ft = font(int(7 * s), True)
+                d.text((x + (cw - d.textlength(st, font=ft)) / 2, y + int(19 * s)), st, font=ft, fill=BG)
+        if not tests and k_show >= n:
+            d.text((int(12 * s), y + int(35 * s)), it["detail"], font=font(int(9 * s)), fill=DIM)
+        y += rowh
+    d.text((int(12 * s), H - int(24 * s)), "OK — верно · WA — неверный ответ · TL — превышено время · RE — ошибка",
+           font=font(int(8 * s)), fill=DIM)
+    return im
+
+
+def channel_construct(inst, res, t, W=480, H=270):
+    """Конструкции: четыре панели — точки на решётке, сортирующая сеть, упаковка, код."""
+    im, d, s = _base(W, H, 7, "Открытые конструкции", res["score"])
+    items = res["items"]
+    pw, ph = (W - int(30 * s)) // 2, (H - int(46 * s)) // 2
+    for i, it in enumerate(items[:4]):
+        x0 = int(10 * s) + (i % 2) * (pw + int(10 * s))
+        y0 = int(36 * s) + (i // 2) * (ph + int(4 * s))
+        shown = t * 1.4 > i * 0.25
+        d.rounded_rectangle([x0, y0, x0 + pw, y0 + ph], radius=int(6 * s), fill=(20, 23, 31))
+        d.text((x0 + int(6 * s), y0 + int(3 * s)), it["label"], font=font(int(9 * s), True), fill=TEXT)
+        if not shown:
+            continue
+        sc = pct(it["ok"])
+        f = font(int(10 * s), True)
+        d.text((x0 + pw - int(6 * s) - d.textlength(sc, font=f), y0 + int(3 * s)), sc, font=f, fill=score_color(it["ok"]))
+        d.text((x0 + int(6 * s), y0 + ph - int(14 * s)), _shorten(d, it["detail"], font(int(8 * s)), pw - int(12 * s)),
+               font=font(int(8 * s)), fill=DIM)
+        a = it.get("got")
+        bx, by, bw, bh = x0 + int(8 * s), y0 + int(17 * s), pw - int(16 * s), ph - int(34 * s)
+        try:
+            if i == 0 and a:
+                n = 24
+                c = min(bw, bh) / n
+                ox = bx + (bw - c * n) / 2
+                for gx in range(n):
+                    for gy in range(n):
+                        d.point((ox + (gx + .5) * c, by + (gy + .5) * c), fill=(70, 74, 88))
+                for p in a:
+                    cx, cy = ox + (p[0] + .5) * c, by + (n - .5 - p[1]) * c
+                    d.ellipse([cx - c * .45, cy - c * .45, cx + c * .45, cy + c * .45], fill=ACCENT)
+            elif i == 1 and a:
+                n = 12
+                gap = bh / (n - 1)
+                k = len(a)
+                dx = bw / max(k, 1)
+                for w in range(n):
+                    d.line([bx, by + w * gap, bx + bw, by + w * gap], fill=(70, 74, 88))
+                for j, (u, v) in enumerate(a):
+                    x = bx + (j + .5) * dx
+                    d.line([x, by + u * gap, x, by + v * gap], fill=ACCENT, width=max(1, int(s)))
+                    for z in (u, v):
+                        d.ellipse([x - 1.5 * s, by + z * gap - 1.5 * s, x + 1.5 * s, by + z * gap + 1.5 * s], fill=ACCENT)
+            elif i == 2 and a:
+                side = min(bw, bh)
+                ox = bx + (bw - side) / 2
+                d.rectangle([ox, by, ox + side, by + side], outline=(90, 94, 108))
+                import itertools as _it
+                import math as _m
+                r = min(_m.dist(p, q) for p, q in _it.combinations(a, 2)) / 2 if len(a) > 1 else 0.1
+                for p in a:
+                    cx, cy = ox + p[0] * side, by + (1 - p[1]) * side
+                    d.ellipse([cx - r * side, cy - r * side, cx + r * side, cy + r * side], outline=ACCENT)
+                    d.ellipse([cx - 1.5 * s, cy - 1.5 * s, cx + 1.5 * s, cy + 1.5 * s], fill=ACCENT)
+            elif i == 3 and a:
+                words = [str(w) for w in a][:48]
+                cols_ = 4
+                rows_ = (len(words) + cols_ - 1) // cols_
+                cell = min(bh / max(rows_, 1), bw / (cols_ * 11))
+                for j, w in enumerate(words):
+                    cx = bx + (j % cols_) * (11 * cell)
+                    cy = by + (j // cols_) * cell
+                    for q, ch in enumerate(w[:10]):
+                        d.rectangle([cx + q * cell, cy, cx + (q + 1) * cell - 1, cy + cell - 1],
+                                    fill=ACCENT if ch == "1" else (45, 49, 60))
+        except (TypeError, ValueError, IndexError):
+            pass
+    return im
+
+
 def radar16(im, cx, cy, R, items, s):
     n = len(items)
     d = ImageDraw.Draw(im)
@@ -337,7 +439,7 @@ def channel_summary(summary, t, W=480, H=270):
         d.rectangle([x0, yb, x0 + bw, yb + int(3 * s)], fill=PANEL)
         if v:
             d.rectangle([x0, yb, x0 + int(bw * v), yb + int(3 * s)], fill=score_color(v))
-        y += int(18.5 * s)
+        y += int(min(18.5, (H / s - 44) / max(1, len(shown))) * s)
     return im
 
 
