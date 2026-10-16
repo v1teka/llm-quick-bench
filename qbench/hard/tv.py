@@ -353,17 +353,16 @@ def channel_construct(inst, res, t, W=480, H=270):
                     cx, cy = ox + (p[0] + .5) * c, by + (n - .5 - p[1]) * c
                     d.ellipse([cx - c * .45, cy - c * .45, cx + c * .45, cy + c * .45], fill=ACCENT)
             elif i == 1 and a:
-                n = 12
-                gap = bh / (n - 1)
-                k = len(a)
-                dx = bw / max(k, 1)
-                for w in range(n):
-                    d.line([bx, by + w * gap, bx + bw, by + w * gap], fill=(70, 74, 88))
-                for j, (u, v) in enumerate(a):
-                    x = bx + (j + .5) * dx
-                    d.line([x, by + u * gap, x, by + v * gap], fill=ACCENT, width=max(1, int(s)))
-                    for z in (u, v):
-                        d.ellipse([x - 1.5 * s, by + z * gap - 1.5 * s, x + 1.5 * s, by + z * gap + 1.5 * s], fill=ACCENT)
+                import math as _m
+                R = min(bw, bh) / 2
+                cx, cy = bx + bw / 2, by + bh / 2
+                d.ellipse([cx - R, cy - R, cx + R, cy + R], outline=(90, 94, 108))
+                for p in a:
+                    r = _m.sqrt(sum(float(c) ** 2 for c in p[:3])) or 1
+                    x, y, z = (float(c) / r for c in p[:3])
+                    col = ACCENT if z >= 0 else (120, 90, 50)
+                    rr = (2.5 if z >= 0 else 1.8) * s
+                    d.ellipse([cx + x * R - rr, cy - y * R - rr, cx + x * R + rr, cy - y * R + rr], fill=col)
             elif i == 2 and a:
                 side = min(bw, bh)
                 ox = bx + (bw - side) / 2

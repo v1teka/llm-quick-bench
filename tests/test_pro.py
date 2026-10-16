@@ -51,7 +51,7 @@ def test_dsl_nested_rotation_and_grid():
 
 def test_task_instances_perfect_answers():
     for key in TASKS:
-        if key in ("code", "construct"):  # свои тесты ниже
+        if key in ("code", "code1", "construct"):  # свои тесты ниже
             continue
         inst = task_instance(key, 2026)
         t = TASKS[key]()
@@ -154,8 +154,8 @@ def test_code_reference_matches_brute_and_scores_full():
             inp = K.GENS[k](rng, "small")
             st, out = K.run_code(K.REF[k], inp, 30)
             assert st == "OK" and K.same(out, K.BRUTE[k](inp)), (k, inp[:120])
-    t = TASKS["code"]()
-    inst = task_instance("code", 2026)
+    t = TASKS["code1"]()
+    inst = task_instance("code1", 2026)
     text = "\n\n".join(f"```python\n# задача {k}\n{c}```" for k, c in enumerate(K.REF, 1))
     s, items = t.score(inst, text)
     assert s == 1.0, [it["detail"] for it in items]
@@ -170,7 +170,25 @@ def test_constructions_scoring():
     from qbench.hard.tasks.construct import item_score
     m = mock_constructions()
     assert abs(item_score(0, m["1"])[0] - 23 / 48) < 1e-9
-    assert abs(item_score(1, m["2"])[0] - 6 / 9) < 1e-9          # Бэтчер: 42 компаратора
-    assert item_score(1, m["2"][:-1])[0] == 0                       # без последнего компаратора не сортирует
+    assert 0 < item_score(1, m["2"])[0] < 0.2                       # спираль Фибоначчи: 50.7°
+    assert item_score(1, m["2"][:-1])[0] == 0                       # 12 точек вместо 13
     assert item_score(2, m["3"])[0] == 0 and abs(item_score(3, m["4"])[0] - 0.6) < 1e-9
     assert item_score(0, m["1"] + [[23, 23]])[0] == 0              # (0,0), (1,1), (23,23) на одной прямой
+
+
+def test_opt_evaluators_and_reference():
+    from qbench.hard.tasks import opt as O
+    insts = O.make_instances(2026)
+    tsp, col, strip = insts[0][0], insts[1][0], insts[2][0]
+    n = 2000
+    assert O.eval_tsp(tsp, " ".join(map(str, range(n))))[0] > 0
+    assert O.eval_tsp(tsp, " ".join(map(str, [0] * n)))[0] is None
+    assert O.eval_color(col, " ".join(map(str, range(250))))[0] == 250
+    assert O.eval_color(col, " ".join(["0"] * 250))[0] is None
+    d = O._ints(strip)
+    assert O.eval_strip(strip, "\n".join("0 0" for _ in range(d[0])))[0] is None    # все в углу — наложение
+    ref = O.load_ref(2026)
+    assert ref and all(len(ref[p["key"]]) == len(p["instances"]) for p in O.PROBLEMS)
+    t = TASKS["code"]()
+    inst = task_instance("code", 2026)
+    assert all(pr["ref"] and all(b > r for b, r in zip(pr["base"], pr["ref"])) for pr in inst["problems"])

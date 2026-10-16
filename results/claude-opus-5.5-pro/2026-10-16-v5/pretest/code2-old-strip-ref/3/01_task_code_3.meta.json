@@ -1,0 +1,9 @@
+{
+ "out": 5426,
+ "overruns": 0,
+ "seconds": 56.7,
+ "tools": [
+  "Read"
+ ],
+ "agent": "subagent (Claude Code), без инструментов"
+}

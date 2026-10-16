@@ -10,7 +10,7 @@ import math
 from .common import Task, extract_json, get_item
 
 N_GRID = 24          # поле для «Ни трёх на прямой»
-SORT_N = 12          # входов сортирующей сети
+TAMMES_N = 13        # точек на сфере
 PACK_N = 10          # точек в квадрате
 CODE_LEN, CODE_D = 10, 4
 
@@ -24,13 +24,12 @@ ITEMS = [
         "best": 2 * N_GRID, "base": 0,
     },
     {
-        "name": f"Сортирующая сеть на {SORT_N} входов",
-        "text": f"Построй сортирующую сеть на {SORT_N} входов (номера 0…{SORT_N - 1}) с как можно меньшим числом "
-                "компараторов. Компаратор `[i, j]` при i < j ставит на позицию i меньшее из двух значений, на j — большее; "
-                "компараторы применяются по порядку. Сеть должна сортировать по возрастанию любой вход. "
-                "Ответ — список пар `[i, j]`. Если сеть сортирует не всё — 0 баллов.",
-        # лучшее известное — 39 (доказанный минимум); стандартная сеть Бэтчера даёт 42; 48 и больше — 0 баллов
-        "best": 39, "base": 48,
+        "name": f"{TAMMES_N} точек на сфере",
+        "text": f"Расставь {TAMMES_N} точек на единичной сфере так, чтобы наименьший из углов между ними (если смотреть "
+                "из центра) был как можно больше (задача Таммеса). Ответ — список троек `[x, y, z]` (не меньше 9 знаков "
+                "после запятой); каждая тройка нормируется на длину, нулевой вектор — 0 баллов.",
+        # лучшее известное (и доказанный оптимум, Мусин и Тарасов, 2012): 57.1367031°; база — 50°
+        "best": 57.1367031, "base": 50.0,
     },
     {
         "name": f"{PACK_N} точек в квадрате",
@@ -67,19 +66,19 @@ def check_grid(ans):
     return len(pts), f"{len(pts)} точек"
 
 
-def check_network(ans):
-    comps = [(int(p[0]), int(p[1])) for p in ans]
-    if any(not (0 <= i < j < SORT_N) for i, j in comps):
-        return None, "компаратор вне диапазона или i ≥ j"
-    # принцип нулей и единиц: достаточно проверить все 2ⁿ двоичных входов
-    for m in range(1 << SORT_N):
-        v = [(m >> t) & 1 for t in range(SORT_N)]
-        for i, j in comps:
-            if v[i] > v[j]:
-                v[i], v[j] = v[j], v[i]
-        if any(v[t] > v[t + 1] for t in range(SORT_N - 1)):
-            return None, f"не сортирует вход {''.join(map(str, [(m >> t) & 1 for t in range(SORT_N)]))}"
-    return len(comps), f"{len(comps)} компараторов"
+def check_sphere(ans):
+    pts = [tuple(float(c) for c in p[:3]) for p in ans]
+    if len(pts) != TAMMES_N:
+        return None, f"точек {len(pts)}, нужно {TAMMES_N}"
+    norm = []
+    for p in pts:
+        r = math.sqrt(sum(c * c for c in p))
+        if r < 1e-9:
+            return None, "нулевой вектор"
+        norm.append(tuple(c / r for c in p))
+    cos = max(sum(x * y for x, y in zip(a, b)) for a, b in itertools.combinations(norm, 2))
+    ang = math.degrees(math.acos(max(-1.0, min(1.0, cos))))
+    return ang, f"мин. угол {ang:.4f}°"
 
 
 def check_packing(ans):
@@ -115,10 +114,10 @@ def item_score(k, ans):
             v, det = check_grid(ans)
             return _clamp(v / it["best"]), det + (f" (максимум {it['best']})" if v else "")
         if k == 1:
-            v, det = check_network(ans)
+            v, det = check_sphere(ans)
             if v is None:
                 return 0.0, det
-            return _clamp((it["base"] - v) / (it["base"] - it["best"])), det + f" (лучшее известное {it['best']})"
+            return _clamp((v - it["base"]) / (it["best"] - it["base"])), det + f" (лучшее известное {it['best']:.4f}°)"
         if k == 2:
             v, det = check_packing(ans)
             if v is None:
