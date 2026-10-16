@@ -175,6 +175,8 @@ def tube(p0, p1, r0, r1, seg=7):
 # листва
 # ---------------------------------------------------------------------------
 
+TREE_LEAF = np.array([[0.10, 0.24, 0.05], [0.15, 0.30, 0.07], [0.22, 0.36, 0.09], [0.12, 0.20, 0.06], [0.27, 0.36, 0.11],
+                      [0.18, 0.27, 0.08]])
 LEAF_COLORS = np.array([[0.13, 0.30, 0.07], [0.20, 0.38, 0.09], [0.28, 0.44, 0.12], [0.16, 0.26, 0.08], [0.33, 0.42, 0.13]])
 
 
@@ -253,15 +255,20 @@ def tree(mb, base, trunk_h, trunk_r, crown_c, crown_r, rng):
     # листва: гроздья у концов веток + наполнение кроны
     P = []
     for t in tips:
-        P.append(t + rng.normal(0, 0.22, (40, 3)))
-    fill = rng.normal(size=(2500, 3))
+        P.append(t + rng.normal(0, 0.2, (90, 3)))
+    nfill = int(np.clip(15000 * float(np.prod(crown_r)) / 1.6, 5000, 22000))
+    fill = rng.normal(size=(nfill, 3))
     fill /= np.linalg.norm(fill, axis=1, keepdims=True)
-    fill *= rng.random((2500, 1)) ** 0.35
-    P.append(crown_c + fill * crown_r)
+    fill *= rng.random((nfill, 1)) ** 0.18  # листва в основном у поверхности кроны
+    # неровная крона: крупные «выпуклости» и провалы
+    lobes = rng.normal(size=(7, 3))
+    lobes /= np.linalg.norm(lobes, axis=1, keepdims=True)
+    bump = 0.84 + 0.32 * np.max(fill @ lobes.T, axis=1)
+    P.append(crown_c + fill * crown_r * np.array([1.0, 1.0, 1.18]) * bump[:, None])
     P = np.concatenate(P)
     rel = (P - crown_c) / crown_r
-    P = P[np.linalg.norm(rel, axis=1) < 1.08]
-    T, N, Cc = leaves(P, 0.14, rng)
+    P = P[np.linalg.norm(rel, axis=1) < 1.35]
+    T, N, Cc = leaves(P, 0.095, rng, colors=TREE_LEAF)
     mb.add("leaf", T, N, colors=Cc)
 
 
@@ -372,3 +379,89 @@ def pedestal(mb, x, y, z0, z1):
     T[..., 0] += x
     T[..., 1] += y
     mb.add("ceramic", T, N)
+
+
+# ---------------------------------------------------------------------------
+# газон и даль
+# ---------------------------------------------------------------------------
+
+GRASS_COLORS = np.array([[0.16, 0.30, 0.07], [0.22, 0.36, 0.09], [0.30, 0.40, 0.12], [0.36, 0.40, 0.16],
+                         [0.12, 0.24, 0.06], [0.42, 0.44, 0.20]])
+
+
+def grass_tile(rng, size=1.0, n=2600):
+    """Квадрат газона size×size (начало в (0, 0)): травинки из двух треугольников, слегка изогнутые."""
+    base = np.c_[rng.random((n, 2)) * size, np.zeros(n)]
+    h = 0.045 + 0.085 * rng.random(n) ** 1.5
+    w = 0.004 + 0.004 * rng.random(n)
+    a = rng.random(n) * 2 * np.pi
+    side = np.c_[np.cos(a), np.sin(a), np.zeros(n)]
+    lean = np.c_[-np.sin(a), np.cos(a), np.zeros(n)] * (rng.normal(0, 0.35, n) * h)[:, None]
+    mid = base + np.c_[np.zeros((n, 2)), h * 0.55] + lean * 0.35
+    tip = base + np.c_[np.zeros((n, 2)), h] + lean
+    b0, b1 = base - side * w[:, None], base + side * w[:, None]
+    m0, m1 = mid - side * (w * 0.6)[:, None], mid + side * (w * 0.6)[:, None]
+    T = np.stack([np.stack([b0, b1, m1], 1), np.stack([b0, m1, m0], 1), np.stack([m0, m1, tip], 1)], 1).reshape(-1, 3, 3)
+    nrm = np.cross(side, [0, 0, 1.0])
+    nrm = nrm + np.array([0, 0, 0.6])
+    nrm /= np.linalg.norm(nrm, axis=1, keepdims=True)
+    N = np.repeat(np.repeat(nrm[:, None], 3, 1)[:, None], 3, 1).reshape(-1, 3, 3)
+    col = GRASS_COLORS[rng.integers(0, len(GRASS_COLORS), n)] * (0.75 + 0.5 * rng.random((n, 1)))
+    Cc = np.repeat(np.repeat(col[:, None], 3, 1)[:, None], 3, 1).reshape(-1, 3, 3)
+    return T, N, Cc
+
+
+FAR_LEAF = np.array([[0.06, 0.14, 0.04], [0.09, 0.18, 0.05], [0.12, 0.21, 0.06], [0.08, 0.15, 0.05], [0.15, 0.22, 0.08]])
+
+
+def far_tree(mb, base, height, rng):
+    """Дерево для дальнего плана: ствол и неровная крона из крупных листьев (ветви издали не видны)."""
+    base = np.asarray(base, float)
+    r = height * rng.uniform(0.22, 0.34)
+    cz = height - r * 1.1
+    Tt, Nt = tube(base, base + [0, 0, cz], 0.12 + height * 0.012, 0.08, 5)
+    mb.add("bark", Tt, Nt)
+    n = int(np.clip(1100 * (r / 3.0) ** 2, 400, 3200))
+    d = rng.normal(size=(n, 3))
+    d /= np.linalg.norm(d, axis=1, keepdims=True)
+    lobes = rng.normal(size=(5, 3))
+    lobes /= np.linalg.norm(lobes, axis=1, keepdims=True)
+    bump = 0.82 + 0.35 * np.max(d @ lobes.T, axis=1)
+    d *= (rng.random((n, 1)) ** 0.2) * bump[:, None]
+    P = base + [0, 0, cz] + d * np.array([r, r, r * 1.25])
+    T, N, Cc = leaves(P, 0.55 + 0.1 * r, rng, up_bias=0.4, colors=FAR_LEAF)
+    mb.add("leaf", T, N, colors=Cc)
+
+
+def treeline(mb, center, rng, r0=75.0, r1=170.0, n=340, gap_y=None):
+    """Дальний лес по кругу, с просветом для улицы."""
+    cx, cy = center
+    k = 0
+    while k < n:
+        ang = rng.random() * 2 * np.pi
+        r = r0 + (r1 - r0) * rng.random() ** 0.7
+        x, y = cx + r * np.cos(ang), cy + r * np.sin(ang)
+        if gap_y is not None and gap_y[0] - 8 < y < gap_y[1] + 8:
+            continue  # просвет для улицы
+        k += 1
+        far_tree(mb, (x, y, 0.0), 8 + 14 * rng.random(), rng)
+
+
+def _blob(c, sc, rng, nu=9, nv=6):
+    us = np.linspace(0, 2 * np.pi, nu + 1)
+    vs = np.linspace(-np.pi / 2, np.pi / 2, nv + 1)
+    jit = 1 + 0.12 * rng.normal(size=(nu + 1, nv + 1))
+    jit[-1] = jit[0]
+
+    def P(i, j):
+        u, v = us[i], vs[j]
+        return c + sc * jit[i, j] * np.array([np.cos(v) * np.cos(u), np.cos(v) * np.sin(u), np.sin(v)])
+    tl = []
+    for i in range(nu):
+        for j in range(nv):
+            a, b, cc, d = P(i, j), P(i + 1, j), P(i + 1, j + 1), P(i, j + 1)
+            tl += [[a, b, cc], [a, cc, d]]
+    T = np.array(tl)
+    N = T - c
+    N /= np.linalg.norm(N, axis=-1, keepdims=True)
+    return T, N

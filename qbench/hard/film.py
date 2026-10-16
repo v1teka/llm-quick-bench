@@ -274,22 +274,24 @@ def channel_image(ch, t):
     if ch == 5:
         im = tv.channel_summary(G["summary"], t)
     else:
-        name = {1: "arc", 2: "optics", 3: "nav", 4: "matryoshka" if "matryoshka" in tasks else "cube"}[ch]
+        name = {1: "arc", 2: "optics", 3: "nav", 4: _k4(tasks)}[ch]
         tsk = tasks.get(name)
         if tsk is None:
             im, d, s = tv._base(480, 270, ch, {1: "Логика", 2: "Оптика", 3: "Навигация", 4: "Матрёшка"}[ch], None)
             d.text((40, 120), "задача не запускалась", font=tv.font(16), fill=tv.DIM)
         else:
-            fn = {"arc": tv.channel_arc, "optics": tv.channel_optics, "nav": tv.channel_nav, "cube": tv.channel_cube,
-                  "matryoshka": tv.channel_matryoshka}[name]
+            fn = tv.channel_matryoshka if name.startswith("matryoshka") else \
+                {"arc": tv.channel_arc, "optics": tv.channel_optics, "nav": tv.channel_nav, "cube": tv.channel_cube}[name]
             res, note, ir = tsk["res"], None, tsk.get("items_res")
+            alt = "по слою на сообщение" if name.startswith("matryoshka") else "по одной"
+            head = "Одним ответом" if name.startswith("matryoshka") else "Набор одним ответом"
             if not tsk.get("answered", True):
-                note = f"Набор одним ответом: нет ответа ({tsk.get('overruns', 0)} × 128k токенов)"
-                if ir:  # на доске — решения по одной головоломке, в счёт они не идут
+                note = f"{head}: нет ответа ({tsk.get('overruns', 0)} × 128k токенов)"
+                if ir:  # на доске — решения в диагностическом режиме, в счёт они не идут
                     res = {"score": res["score"], "items": ir["items"]}
-                    note += f" · по одной: {tv.pct(ir['score'])}"
+                    note += f" · {alt}: {tv.pct(ir['score'])}"
             elif ir:
-                note = f"Набор одним ответом: {tv.pct(res['score'])} · по одной: {tv.pct(ir['score'])}"
+                note = f"{head}: {tv.pct(res['score'])} · {alt}: {tv.pct(ir['score'])}"
             im = fn(tsk["inst"], res, t)
             if note:
                 im = tv.note_strip(im, note, bad=not tsk.get("answered", True))
@@ -303,7 +305,9 @@ def channel_image(ch, t):
 # сценарий
 # ---------------------------------------------------------------------------
 
-def build_film(summary, scene, tasks, out_dir, quality="normal", fps=12, workers=None, log=print):
+def build_film(summary, scene, tasks, out_dir, quality="normal", fps=12, workers=None, log=print, renderer="photo",
+               spp=3, preview=None, render_scale=0.75, hdr_cache=None):
+    """renderer: photo — путь-трейсинг OSPRay + денойзер (реализм), raster — быстрый растеризатор."""
     W, H, ss = QUALITY[quality]
     model = summary["model"]
     sc = scene
@@ -316,11 +320,7 @@ def build_film(summary, scene, tasks, out_dir, quality="normal", fps=12, workers
         o = sc.tvs[tid]
         screens[k] = screen_info(o, getattr(o, "facing", "-y"))
     G["screens"] = screens
-    log("  меш сцены…")
-    mesh = Mesh(sc.objects, scr_map)
-    G["mesh"] = mesh
-    bnd = (np.array([-9, -9, 0.0]), np.array([23, 17, 11.5]))
-    G["shadow"] = ShadowMap(mesh, LIGHT, bnd, 2048)
+    G["hdr_cache"] = hdr_cache
     # порядок стройки: снизу вверх
     order = np.lexsort((sc.amin[:, 0], sc.amin[:, 1], np.round(sc.amin[:, 2], 1)))
     rank = np.empty(len(order), int)
@@ -328,8 +328,23 @@ def build_film(summary, scene, tasks, out_dir, quality="normal", fps=12, workers
     G["build_rank"] = rank
     n = len(order)
     stages = [int(n * f) for f in (0.15, 0.35, 0.55, 0.75, 0.9)]
-    log("  тени этапов стройки…")
-    G["stage_shadows"] = [ShadowMap(mesh.subset(rank < s), LIGHT, bnd, 1024) for s in stages]
+    if renderer == "photo":
+        try:
+            from .photoreal import Photoreal  # noqa: F401  (проверка, что OSPRay доступен)
+            from ..render.ospray import ensure_ospray
+            ensure_ospray(log=log)
+        except Exception as e:  # noqa: BLE001
+            log(f"  фотореализм недоступен ({e}); рендер растеризатором")
+            renderer = "raster"
+    G["renderer"] = renderer
+    if renderer == "raster":
+        log("  меш сцены…")
+        mesh = Mesh(sc.objects, scr_map)
+        G["mesh"] = mesh
+        bnd = (np.array([-9, -9, 0.0]), np.array([23, 17, 11.5]))
+        G["shadow"] = ShadowMap(mesh, LIGHT, bnd, 2048)
+        log("  тени этапов стройки…")
+        G["stage_shadows"] = [ShadowMap(mesh.subset(rank < s), LIGHT, bnd, 1024) for s in stages]
     # дверь
     op, di = find_main_door(sc)
     if di is not None:
@@ -425,8 +440,9 @@ def build_film(summary, scene, tasks, out_dir, quality="normal", fps=12, workers
     cur = p_door
     cur_dir = np.array([0, -1.0, 0])
     step = 2.1 / fps
-    k4 = "matryoshka" if "matryoshka" in tasks else "cube"
-    ch_names = {1: "Логика", 2: "Оптика", 3: "Навигация", 4: "Матрёшка" if k4 == "matryoshka" else "Кубик", 5: "Итоги бенчмарка"}
+    k4 = _k4(tasks)
+    ch_names = {1: "Логика", 2: "Оптика", 3: "Навигация", 4: "Матрёшка" if k4.startswith("matryoshka") else "Кубик",
+                5: "Итоги бенчмарка"}
     ch_scores = {1: _ts(tasks, "arc"), 2: _ts(tasks, "optics"), 3: _ts(tasks, "nav"), 4: _ts(tasks, k4), 5: summary["overall"]}
     for k, vp in enumerate(vps):
         ch = k + 1
@@ -481,7 +497,16 @@ def build_film(summary, scene, tasks, out_dir, quality="normal", fps=12, workers
                              "score": ch_scores[ch], "step": f"ТВ {ch}"})
     jobs += [{"kind": "card", "card": "checks"}] * int(4.0 * fps)
 
+    if preview:  # быстрый просмотр: равномерная выборка кадров
+        idx = np.linspace(0, len(jobs) - 1, int(preview)).round().astype(int)
+        jobs = [jobs[i] for i in idx]
     log(f"  кадров: {len(jobs)}; рендер…")
+    if renderer == "photo":
+        from .photoreal import Photoreal
+        G["photo"] = Photoreal(sc, screens=screens, build_rank=rank, dynamic=G.get("door_idx") if di is not None else None,
+                               hinge=G.get("hinge"), log=log)
+        frames = _photo_frames(jobs, spp, log, render_scale)
+        return [Image.fromarray(f) for f in frames]
     workers = workers or min(4, os.cpu_count() or 1)
     if workers > 1:
         ctx = get_context("fork")
@@ -491,6 +516,67 @@ def build_film(summary, scene, tasks, out_dir, quality="normal", fps=12, workers
         frames = [_job(j) for j in jobs]
     frames = [Image.fromarray(f) for f in frames]
     return frames
+
+
+def _photo_frames(jobs, spp, log, scale=1.0):
+    """Кадры сцены — путь-трейсингом (последовательно: OSPRay сам занимает все ядра), остальное — как раньше."""
+    import time
+    from . import photoreal as PR
+    P = G["photo"]
+    W, H, _ = G["size"]
+    frames, ex_prev, tv_key = [], None, {}
+    n_scene = sum(1 for j in jobs if j["kind"] == "scene")
+    k, t0 = 0, time.time()
+    for j in jobs:
+        if j["kind"] != "scene":
+            frames.append(_job(j))
+            continue
+        gain = 0.9 / ex_prev if ex_prev else 0.05
+        for ch in range(5):
+            t = j.get("tv_t", {}).get(ch + 1, 0.5) if j.get("tv", True) else None
+            key = (None if t is None else round(float(t), 3), round(math.log(gain), 1))
+            if tv_key.get(ch) != key:
+                img = np.zeros((270, 480, 3), np.uint8) if t is None else np.asarray(channel_image(ch + 1, t))
+                P.set_screen(ch, img, gain=gain)
+                tv_key[ch] = key
+        P.set_door(j.get("door") or 0.0)
+        rw, rh = int(round(W * scale / 2)) * 2, int(round(H * scale / 2)) * 2
+        hdr = None
+        cache = G.get("hdr_cache")
+        if cache and not j.get("tv", True):  # кадры без телевизоров не зависят от результатов — кэшируем
+            import hashlib
+            key = hashlib.sha1(repr((np.round(j["eye"], 4).tolist(), np.round(j["tgt"], 4).tolist(), j["fov"], j.get("upto"),
+                                     j.get("door"), rw, rh, spp)).encode()).hexdigest()[:16]
+            path = os.path.join(cache, key + ".npy")
+            if os.path.exists(path):
+                hdr = np.load(path).astype(np.float32)
+        if hdr is None:
+            hdr = P.render(j["eye"], j["tgt"], j["fov"], rw, rh, upto=j.get("upto"), spp=spp)
+            if cache and not j.get("tv", True):
+                os.makedirs(cache, exist_ok=True)
+                np.save(path, hdr.astype(np.float16))
+        ex = PR.auto_exposure(hdr)
+        if ex_prev is not None:  # плавная адаптация «глаза» между кадрами
+            ex = math.exp(0.7 * math.log(ex_prev) + 0.3 * math.log(ex))
+        ex_prev = ex
+        im = Image.fromarray(PR.tonemap(hdr, ex))
+        if im.size != (W, H):
+            im = im.resize((W, H), Image.LANCZOS)
+        if j.get("blend") is not None:
+            b, ch, t = j["blend"]
+            full = letterbox(channel_image(ch, t), im.size[0], im.size[1])
+            im = Image.blend(im, full, b)
+        frames.append(np.asarray(tv.overlay16(im, G["model"], j["caption"], j.get("score"), j.get("step", ""))))
+        k += 1
+        if k % 25 == 0 or k == n_scene:
+            el = time.time() - t0
+            log(f"  кадр сцены {k}/{n_scene}: {el / k:.1f} с/кадр, осталось ≈ {el / k * (n_scene - k) / 60:.0f} мин")
+    return frames
+
+
+def _k4(tasks):
+    """Задача четвёртого телевизора: матрёшка (любой версии) или набор «Кубик»."""
+    return next((k for k in tasks if k.startswith("matryoshka")), "cube")
 
 
 def _ts(tasks, key):

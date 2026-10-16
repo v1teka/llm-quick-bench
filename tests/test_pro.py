@@ -60,6 +60,12 @@ def test_task_instances_perfect_answers():
                    for i, b in enumerate(inst["boards"])}
         elif key == "nav":
             ans = {str(i + 1): l["solution"] for i, l in enumerate(inst["levels"]) if l["solution"]}
+        elif key.startswith("matryoshka"):
+            ch = inst["chain"]
+            text = "\n".join(json.dumps({k: ch[k]}) for k in ("L5", "L4", "L3", "L2", "L1"))
+            s, items = t.score(inst, text + "\n" + json.dumps({"L0": {"moves": ch["L0"]}}))
+            assert s > 0.999 and all(it["ok"] >= 0.999 for it in items), (key, [it["detail"] for it in items])
+            continue
         else:
             ans = {str(i + 1): ({"stamps": p["stamps"], **p["final"]} if p["kind"] == "sim" else {"moves": p["solution"]})
                    for i, p in enumerate(inst["puzzles"])}
@@ -98,7 +104,38 @@ def test_house_in_parts_equals_whole():
 
 def test_puzzle_modes(tmp_path):
     s = HardRun(mock_factory(), "Mock", str(tmp_path / "a"), log=lambda *a: None, puzzles="sets", item_diag=True).execute()
-    assert all(t["answered"] and t.get("items_res") for t in s["tasks"].values())
+    single = {k: t for k, t in s["tasks"].items() if t.get("mode") != "layers"}  # матрёшка — диалог по слоям
+    assert single and all(t["answered"] and t.get("items_res") for t in single.values())
     s2 = HardRun(mock_factory(), "Mock", str(tmp_path / "b"), log=lambda *a: None, puzzles="items").execute()
-    assert {k: round(t["res"]["score"], 3) for k, t in s2["tasks"].items()} == \
-           {k: round(t["items_res"]["score"], 3) for k, t in s["tasks"].items()}
+    assert {k: round(t["res"]["score"], 3) for k, t in s2["tasks"].items() if k in single} == \
+           {k: round(t["items_res"]["score"], 3) for k, t in single.items()}
+
+
+def test_matryoshka_v2_layers():
+    from qbench.hard.tasks import olymp2026 as O
+    # слой 5: структура последовательности совпадает с прямым перебором
+    pre, _ = O.p6_prefix(1925, 4000)
+    assert O.p6_count(1925, pre[-1]) == len(pre) and O.p6_term(1925, 3999) == pre[3998]
+    # слой 4: критерий коллапса и точный счёт ударов
+    assert [A for A in range(100, 500) if (O.sim4_float(A, 0.8, 200000) is None) != O.collapse4(A)] == []
+    assert O.solve4(250) == 105 and O.solve4(1000) == 0
+    # слой 3: c_1 = 2/3, c_2 = 4/7
+    assert O.solve3(1) == 5 and O.solve3(2) == 11
+    # слой 2: порядок тасовки = перебор циклов
+    assert all(O.monge_order(D) == O.monge_order_brute(D) for D in range(2, 400, 2))
+    # слой 1: θ = 180°/n ⇔ k | m
+    assert O.solve1(358) == 23  # m = 360
+    # оценка «по слоям»: ошибка в слое 4 не обнуляет внешние слои
+    from qbench.hard.runner import TASKS, task_instance
+    inst = task_instance("matryoshka", 2026)
+    t = TASKS["matryoshka"]()
+    ch = dict(inst["chain"])
+    wrong4 = ch["L4"] + 1
+    a3 = O.solve3(O.param3(wrong4)); a2 = O.solve2(a3); a1 = O.solve1(a2)
+    from qbench.hard.tasks.matryoshka import solve0
+    _, _, mv = solve0(inst["board"], a1)
+    text = "\n".join(json.dumps(x) for x in ({"L5": ch["L5"]}, {"L4": wrong4}, {"L3": a3}, {"L2": a2}, {"L1": a1},
+                                               {"L0": {"moves": mv}}))
+    s, items = t.score(inst, text)
+    summ = items[0]["summary"]
+    assert summ["chain"] == 1 and abs(summ["by_layer"] - 5 / 6) < 1e-9

@@ -48,14 +48,29 @@ def _mix(c1, c2, t):
     return c1 * (1 - t[..., None]) + c2 * t[..., None]
 
 
-def grass(n=512, seed=1):
+def grass(n=1024, seed=1):
     rng = np.random.default_rng(seed)
     low = fbm(n, rng, base=3, octaves=4)
     mid = fbm(n, rng, base=12, octaves=3)
     hi = rng.random((n, n))
-    col = _mix((0.20, 0.33, 0.10), (0.38, 0.52, 0.18), np.clip(low * 1.4 - 0.2, 0, 1))
-    col = _mix(col, (0.55, 0.55, 0.28), np.clip((mid - 0.62) * 3, 0, 1) * 0.5)  # сухие пятна
-    col *= (0.75 + 0.5 * hi[..., None] ** 2)  # травинки
+    streak = fbm(n, rng, base=48, octaves=2, aspect=(1, 6))  # штрихи травинок
+    col = _mix((0.17, 0.27, 0.08), (0.30, 0.40, 0.13), np.clip(low * 1.4 - 0.2, 0, 1))
+    col = _mix(col, (0.45, 0.43, 0.22), np.clip((mid - 0.6) * 3, 0, 1) * 0.55)  # сухие пятна
+    col *= (0.70 + 0.45 * hi[..., None] ** 2) * (0.85 + 0.3 * streak[..., None])
+    return _u8(np.clip(col, 0, 1))
+
+
+def floor_tile(n=512, seed=12, cells=4, color=(0.80, 0.78, 0.74)):
+    """Керамическая плитка с затиркой (кафель пола санузла и кухни)."""
+    rng = np.random.default_rng(seed)
+    u = np.arange(n) / n * cells
+    U, V = np.meshgrid(u, u)
+    fu, fv = U % 1, V % 1
+    seam = (np.minimum(fu, 1 - fu) < 0.012) | (np.minimum(fv, 1 - fv) < 0.012)
+    idx = (np.floor(U) + 17 * np.floor(V)).astype(int)
+    tints = 0.94 + 0.08 * rng.random(int(idx.max()) + 2)
+    col = np.asarray(color) * tints[idx][..., None] * (0.95 + 0.06 * fbm(n, rng, base=10, octaves=4)[..., None])
+    col[seam] = (0.55, 0.54, 0.52)
     return _u8(np.clip(col, 0, 1))
 
 
@@ -168,4 +183,5 @@ def roof_tile(n=256, seed=11):
 
 
 ALL = {"grass": grass, "plaster": plaster, "concrete": concrete, "wood": wood_grain, "parquet": parquet,
-       "bricks": bricks, "stone": stone_paving, "asphalt": asphalt, "bark": bark, "fabric": fabric, "tile": roof_tile}
+       "bricks": bricks, "stone": stone_paving, "asphalt": asphalt, "bark": bark, "fabric": fabric, "tile": roof_tile,
+       "floortile": floor_tile}

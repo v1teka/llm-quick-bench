@@ -230,16 +230,24 @@ def update_leaderboard(results_dir):
     rows.sort(key=lambda r: -r[0])
     from .hard import config as HC
     L = ["# Лидерборд llm-quick-bench · Дом-3D", ""]
-    for title, abil, sel in (("Pro: детальный дом + 4 набора головоломок", HC.ABILITIES, lambda d: d.get("track") == "pro"),
-                             ("Базовый трек", C.ABILITIES, lambda d: d.get("track") != "pro")):
+    from .hard.runner import PROTOCOL, PROTOCOL_NAMES, protocol_of
+    sections = (
+        (f"Pro: детальный дом + 4 набора головоломок (протокол {PROTOCOL}: {PROTOCOL_NAMES[PROTOCOL]})", HC.ABILITIES,
+         lambda d: d.get("track") == "pro" and protocol_of(d) == PROTOCOL),
+        ("Pro: прежние версии протокола", HC.ABILITIES, lambda d: d.get("track") == "pro" and protocol_of(d) != PROTOCOL),
+        ("Базовый трек", C.ABILITIES, lambda d: d.get("track") != "pro"))
+    for title, abil, sel in sections:
         part = [r for r in rows if sel(r[1])]
         if not part:
             continue
-        L += [f"## {title}", "", "| # | Модель | Итог | " + " | ".join(n for _, n in abil) + " | Дата | Видео |",
-              "|" + "---|" * (len(abil) + 5)]
+        old = title.startswith("Pro: прежние")
+        L += [f"## {title}", "", "| # | Модель | Итог | " + ("Протокол | " if old else "") + " | ".join(n for _, n in abil)
+              + " | Дата | Видео |", "|" + "---|" * (len(abil) + 5 + old)]
         for i, (tot, d, rel) in enumerate(part, 1):
             vals = " | ".join("—" if d["abilities"].get(k) is None else f"{d['abilities'][k]:.0%}" for k, _ in abil)
-            L.append(f"| {i} | {d['model']} | **{tot:.0%}** | {vals} | {d['date'][:10]} | [gif]({rel}/video.gif) |")
+            video = f"[gif]({rel}/video.gif)" if os.path.exists(os.path.join(results_dir, rel, "video.gif")) else "—"
+            proto = f"{protocol_of(d)} | " if old else ""
+            L.append(f"| {i} | {d['model']} | **{tot:.0%}** | {proto}{vals} | {d['date'][:10]} | {video} |")
         L.append("")
     os.makedirs(results_dir, exist_ok=True)
     path = os.path.join(results_dir, "LEADERBOARD.md")

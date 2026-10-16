@@ -106,7 +106,9 @@ def cmd_hard(a):
                                  overrun_retries=a.overrun_retries)
     os.makedirs(out, exist_ok=True)
     print(f"Прогон Pro «{label}» → {out}")
-    run = HR.HardRun(factory, label, out, fix_rounds=a.fix_rounds, seed=a.seed, puzzles=a.puzzles, item_diag=a.item_diag)
+    tasks = tuple(t.strip() for t in a.tasks.split(",") if t.strip()) if a.tasks else HR.DEFAULT_TASKS
+    run = HR.HardRun(factory, label, out, fix_rounds=a.fix_rounds, seed=a.seed, puzzles=a.puzzles, item_diag=a.item_diag,
+                     tasks=tasks)
     try:
         summary = run.execute()
     except HR.Pending as e:
@@ -127,7 +129,8 @@ def cmd_hard(a):
             print("Сцены дома нет — ролик не собран")
             return
         print("Рендер ролика…")
-        frames = film.build_film(summary, scene, summary["tasks"], out, quality=a.quality, fps=a.fps)
+        frames = film.build_film(summary, scene, summary["tasks"], out, quality=a.quality, fps=a.fps, renderer=a.render,
+                                 spp=a.spp, render_scale=a.render_scale)
         paths = film.save_outputs(frames, out, fps=a.fps)
         frames[len(frames) // 3].save(os.path.join(out, "poster.png"))
         for k, p in paths.items():
@@ -208,8 +211,15 @@ def main(argv=None):
     h.add_argument("--item-diag", action="store_true",
                    help="при --puzzles sets ещё и спросить каждую головоломку отдельно (диагностика, в счёт не идёт)")
     h.add_argument("--manual", metavar="DIR")
+    h.add_argument("--tasks", help="наборы задач через запятую (по умолчанию arc,optics,nav,matryoshka; "
+                                   "matryoshka1 — первая, классическая версия матрёшки)")
     h.add_argument("--quality", choices=["fast", "normal", "high"], default="normal")
     h.add_argument("--fps", type=int, default=12)
+    h.add_argument("--render", choices=["photo", "raster"], default="photo",
+                   help="photo — путь-трейсинг OSPRay + денойзер OIDN (реализм, ~4 с/кадр на 2 ядрах); raster — быстрый")
+    h.add_argument("--spp", type=int, default=3, help="лучей на пиксель для --render photo")
+    h.add_argument("--render-scale", type=float, default=0.75,
+                   help="доля разрешения, в которой считается путь-трейсинг (кадр затем масштабируется)")
     h.add_argument("--no-video", action="store_true")
     h.add_argument("--results", default="results")
     h.add_argument("--out-dir")

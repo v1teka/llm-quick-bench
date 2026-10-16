@@ -14,7 +14,7 @@ import numpy as np
 
 from ..render import assets as A
 from ..render import textures as TX
-from ..render.ospray import (OSPRay, T, FB_RGBA32F, FB_COLOR, FB_NORMAL, FB_ALBEDO, DENOISE_HIGH)
+from ..render.ospray import (OSPRay, T, FB_RGBA32F, FB_COLOR, FB_DEPTH, FB_NORMAL, FB_ALBEDO, DENOISE_HIGH)
 from . import config as C
 
 SUN = np.array([0.45, 0.55, -0.70])  # направление света солнца (из film.LIGHT со сменой знака)
@@ -49,7 +49,10 @@ MATERIALS = {
     "counter": ("principled", dict(roughness=0.18, specular=0.8), "concrete", 1.2),
     "blackglass": ("principled", dict(roughness=0.04, specular=1.0, baseColor=(0.02, 0.02, 0.02)), None, 1.0),
     "screen_frame": ("principled", dict(roughness=0.3, specular=0.6), None, 1.0),
-    "lamp": ("principled", dict(roughness=0.7, emissiveColor=(3.2, 2.6, 1.8)), None, 1.0),
+    "lamp": ("principled", dict(roughness=0.7, emissiveColor=(0.30, 0.25, 0.18)), None, 1.0),
+    "grassblade": ("principled", dict(roughness=0.6, specular=0.3, thin=True, backlight=0.45, thickness=0.02), None, 1.0),
+    "foliage_far": ("principled", dict(roughness=0.95, specular=0.1), None, 1.0),
+    "floortile": ("principled", dict(roughness=0.22, specular=0.6), "floortile", 1.2),
     "leaf": ("principled", dict(roughness=0.55, specular=0.35, thin=True, backlight=0.65, thickness=0.05), None, 1.0),
     "bark": ("principled", dict(roughness=0.92, specular=0.15), "bark", 0.8),
     "stem": ("principled", dict(roughness=0.7, baseColor=(0.08, 0.18, 0.05)), None, 1.0),
@@ -141,7 +144,8 @@ def surface_key(o):
 # ---------------------------------------------------------------------------
 
 class Photoreal:
-    def __init__(self, sc, screens=None, build_rank=None, stages=48, threads=None, log=print, seed=7):
+    def __init__(self, sc, screens=None, build_rank=None, stages=48, threads=None, log=print, seed=7, dynamic=None,
+                 hinge=None):
         self.sc = sc
         self.log = log
         self.o = OSPRay(threads=threads or os.cpu_count(), log=log)
@@ -157,6 +161,10 @@ class Photoreal:
         log("  фотореализм: материалы и модели…")
         builders = [A.MeshBuilder() for _ in range(stages)]
         used = np.zeros(n, bool)
+        dyn = A.MeshBuilder()
+        for i in dynamic or []:  # входная дверь — отдельный экземпляр, его поворачивает set_door()
+            self._primitive(dyn, sc.objects[i])
+            used[i] = True
         self._substitute(builders, used)
         stage_of = np.minimum(stages - 1, (rank * stages) // max(1, n))
         for i, o in enumerate(sc.objects):
@@ -166,6 +174,8 @@ class Photoreal:
         self.groups = []
         for s, mb in enumerate(builders):
             self.groups.append(self._group(mb))
+        self.door = self._group(dyn) if dynamic else None
+        self.hinge = np.asarray(hinge if hinge is not None else (0.0, 0.0), float)
         self.stage_start = [int(math.ceil(s * n / stages)) for s in range(stages)]
         self._env()
         self._screens_init()
@@ -205,6 +215,12 @@ class Photoreal:
         tris = o.triangles().astype(np.float32)
         fn = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
         fn /= np.linalg.norm(fn, axis=1, keepdims=True) + 1e-12
+        # все примитивы выпуклые: разворачиваем грани наружу (обход вершин в сцене бывает внутрь)
+        inner = tris.reshape(-1, 3).mean(0)
+        inward = np.einsum("ij,ij->i", fn, tris.mean(1) - inner) < 0
+        if inward.any():
+            tris[inward] = tris[inward][:, [0, 2, 1]]
+            fn[inward] *= -1
         # мягкая мебель — скруглённые коробки
         if o.type == "box" and o.tag in SOFT | {"furniture"} and key == "fabric":
             r = min(0.06, 0.35 * float(min(o.half)))
@@ -356,14 +372,94 @@ class Photoreal:
         for yy in (y0, y1):
             Tc, Nc = A.rounded_box([cx, yy, 0.06], [2 * S, 0.2, 0.12], 0.02)
             mb.add("concrete", Tc, Nc)
+        A.treeline(mb, (cx, cy), self.rng, gap_y=C.STREET_Y)
+        self._floor_tiles(mb)
         self.env = self._group(mb)
+        self.grass = self._grass()
+
+    def _floor_tiles(self, mb):
+        """Плитка поверх перекрытия в санузлах и на кухне (в DSL пол — одна плита на этаж)."""
+        slabs = [o for o in self.sc.objects if o.tag == "floor_slab"]
+        rooms = getattr(self.sc, "rooms", None) or []
+        for r in (rooms.values() if isinstance(rooms, dict) else rooms):
+            g = (lambda k: r.get(k)) if isinstance(r, dict) else (lambda k: getattr(r, k, None))
+            if g("type") not in ("bath", "bath_access", "kitchen"):
+                continue
+            for (x0, y0, x1, y1) in g("rects") or []:
+                cxy = np.array([(x0 + x1) / 2, (y0 + y1) / 2])
+                ffl = C.FFL0 if (g("level") or 0) == 0 else C.FFL1
+                tops = [o.aabb_max[2] for o in slabs if o.aabb_min[0] <= cxy[0] <= o.aabb_max[0]
+                        and o.aabb_min[1] <= cxy[1] <= o.aabb_max[1] and abs(o.aabb_max[2] - ffl) < 0.3]
+                z = (max(tops) if tops else ffl) + 0.004
+                q = np.array([[[x0, y0, z], [x1, y0, z], [x1, y1, z]], [[x0, y0, z], [x1, y1, z], [x0, y1, z]]], np.float32)
+                mb.add("floortile", q, np.tile([0, 0, 1.0], (2, 3, 1)))
+
+    def _grass(self):
+        """Газон на участке: три варианта плитки 1×1 м с травинками, экземпляры по свободным клеткам."""
+        L = self.o.lib
+        rng = np.random.default_rng(23)
+        variants = []
+        for _ in range(3):
+            mb = A.MeshBuilder()
+            T_, N_, C_ = A.grass_tile(rng)
+            mb.add("grassblade", T_, N_, colors=C_)
+            variants.append(mb)
+        groups = []
+        for mb in variants:
+            models = []
+            for key in mb.parts:
+                Tt, Nn, UV, Cc = mb.arrays(key)
+                g = L.ospNewGeometry(b"mesh")
+                V = Tt.reshape(-1, 3)
+                for name, arr, typ in (("vertex.position", V, T["VEC3F"]), ("vertex.normal", Nn.reshape(-1, 3), T["VEC3F"]),
+                                       ("vertex.color", Cc.reshape(-1, 3), T["VEC3F"])):
+                    d = self.o.data(np.ascontiguousarray(arr, np.float32), typ)
+                    L.ospSetObject(g, name.encode(), d)
+                    L.ospRelease(d)
+                d = self.o.data(np.arange(len(V), dtype=np.uint32).reshape(-1, 3), T["VEC3UI"])
+                L.ospSetObject(g, b"index", d)
+                L.ospRelease(d)
+                L.ospCommit(g)
+                gm = L.ospNewGeometricModel(g)
+                L.ospSetObject(gm, b"material", self.mat(key))
+                L.ospCommit(gm)
+                models.append(gm)
+            grp = L.ospNewGroup()
+            d = self.o.objects(models, T["GEOMETRIC_MODEL"])
+            L.ospSetObject(grp, b"geometry", d)
+            L.ospCommit(grp)
+            groups.append(grp)
+        # свободные клетки участка
+        x0, x1, y0, y1 = C.PLOT
+        free = np.ones((int(y1 - y0), int(x1 - x0)), bool)
+        soft = {"plant", "tree", "fence", "gate", "lamp", "furniture", "table", "chair", "decor", "other"}
+        for o in self.sc.objects:
+            if o.aabb_min[2] > 0.3 or o.tag in soft:
+                continue
+            i0, i1 = int(np.floor(o.aabb_min[1] - y0)), int(np.ceil(o.aabb_max[1] - y0))
+            j0, j1 = int(np.floor(o.aabb_min[0] - x0)), int(np.ceil(o.aabb_max[0] - x0))
+            free[max(0, i0):max(0, i1), max(0, j0):max(0, j1)] = False
+        out = []
+        for i, j in zip(*np.nonzero(free)):
+            k = int(rng.integers(0, 4))
+            c, s_ = [(1, 0), (0, 1), (-1, 0), (0, -1)][k]
+            # поворот вокруг центра клетки
+            tx = x0 + j + 0.5 - (c * 0.5 - s_ * 0.5)
+            ty = y0 + i + 0.5 - (s_ * 0.5 + c * 0.5)
+            inst = L.ospNewInstance(groups[int(rng.integers(0, len(groups)))])
+            self.o.affine(inst, "transform", [[c, -s_, 0, tx], [s_, c, 0, ty], [0, 0, 1, 0.0]])
+            L.ospCommit(inst)
+            out.append(inst)
+        self.log(f"  фотореализм: газон — {len(out)} м² травы")
+        return out
 
     def _screens_init(self):
         """Экраны телевизоров: передняя грань — излучающий материал с картинкой канала."""
         L = self.o.lib
         self.screen_models = {}
         for k, S in self.screens.items():
-            c, rgt, up, nrm = S["center"], S["right"], S["up"], S["normal"]
+            c, rgt, nrm = (np.asarray(S[k], float) for k in ("center", "right", "normal"))
+            up = np.asarray(S.get("up", (0.0, 0.0, 1.0)), float)
             w, h = S["w"], S["h"]
             p = c + nrm * 0.002
             quad = [p - rgt * w / 2 - up * h / 2, p + rgt * w / 2 - up * h / 2, p + rgt * w / 2 + up * h / 2, p - rgt * w / 2 + up * h / 2]
@@ -398,6 +494,16 @@ class Photoreal:
                 mb.add("screen_frame", o.triangles(), colors=np.full((len(o.triangles()), 3, 3), 0.02))
         self.screen_body = self._group(mb)
 
+    def set_door(self, ang):
+        """Поворот полотна двери на угол ang (рад) вокруг вертикальной оси через петлю hinge."""
+        if self.door is None:
+            return
+        c, s_ = math.cos(ang), math.sin(ang)
+        hx, hy = self.hinge
+        tx, ty = hx - (c * hx - s_ * hy), hy - (s_ * hx + c * hy)
+        self.o.affine(self.door, "transform", [[c, -s_, 0, tx], [s_, c, 0, ty], [0, 0, 1, 0.0]])
+        self.o.lib.ospCommit(self.door)
+
     def set_screen(self, k, img, gain=1.6):
         if k not in self.screen_models:
             return
@@ -416,7 +522,7 @@ class Photoreal:
         L = self.o.lib
         lt = L.ospNewLight(b"sunSky")
         d = SUN / np.linalg.norm(SUN)
-        self.o.set(lt, up=(0.0, 0.0, 1.0), direction=tuple(d), turbidity=2.6, albedo=0.25, horizonExtension=0.15,
+        self.o.set(lt, up=(0.0, 0.0, 1.0), direction=tuple(d), turbidity=2.2, albedo=0.25, horizonExtension=0.15,
                    intensity=0.025)
         L.ospCommit(lt)
         self.light = lt
@@ -424,7 +530,7 @@ class Photoreal:
     # ---- кадр
     def render(self, eye, tgt, fov, W, H, upto=None, spp=8, denoise=True):
         L = self.o.lib
-        inst = [self.env, self.screen_body] + [m[3] for m in self.screen_models.values()]
+        inst = [self.env, self.screen_body, self.door] + [m[3] for m in self.screen_models.values()] + list(self.grass)
         for s, g in enumerate(self.groups):
             if g is None:
                 continue
@@ -451,7 +557,7 @@ class Photoreal:
         L.ospCommit(self.renderer)
         key = (W, H, denoise)
         if key not in self._fb:
-            fb = L.ospNewFrameBuffer(W, H, FB_RGBA32F, FB_COLOR | FB_NORMAL | FB_ALBEDO)
+            fb = L.ospNewFrameBuffer(W, H, FB_RGBA32F, FB_COLOR | FB_DEPTH | FB_NORMAL | FB_ALBEDO)
             if denoise and self.o.has_denoiser:
                 dn = L.ospNewImageOperation(b"denoiser")
                 self.o.uint(dn, "quality", DENOISE_HIGH)
@@ -464,8 +570,58 @@ class Photoreal:
         L.ospResetAccumulation(fb)
         L.ospRenderFrameBlocking(fb, self.renderer, cam, world)
         img = self.o.map(fb, FB_COLOR, np.float32, (H, W, 4))[::-1, :, :3]
+        depth = self.o.map(fb, FB_DEPTH, np.float32, (H, W))[::-1]
         L.ospRelease(cam)
         L.ospRelease(world)
+        return self._clouds(np.ascontiguousarray(img), depth, eye, dirv, fov, W, H)
+
+    # ---- облака: слой кучевых облаков на высоте ~1.4 км поверх пикселей неба (лучи, не попавшие в сцену)
+    CLOUD_H, CLOUD_TILE = 1400.0, 7000.0
+
+    def _clouds(self, img, depth, eye, dirv, fov, W, H):
+        sky = ~np.isfinite(depth) | (depth > 1e20)
+        if not sky.any():
+            return img
+        if not hasattr(self, "_cloud_tex"):
+            rng = np.random.default_rng(31)
+            self._cloud_tex = TX.fbm(1024, rng, base=3, octaves=7, gain=0.55)
+        f = dirv / np.linalg.norm(dirv)
+        r = np.cross(f, [0.0, 0.0, 1.0])
+        r /= np.linalg.norm(r) + 1e-12
+        u = np.cross(r, f)
+        t = math.tan(math.radians(fov) / 2)
+        ys, xs = np.nonzero(sky)
+        sx = ((xs + 0.5) / W * 2 - 1) * t * (W / H)
+        sy = (1 - (ys + 0.5) / H * 2) * t
+        d = f[None] + sx[:, None] * r[None] + sy[:, None] * u[None]
+        d /= np.linalg.norm(d, axis=1, keepdims=True)
+        dz = d[:, 2]
+        up = dz > 0.015
+        if not up.any():
+            return img
+        ys, xs, d, dz = ys[up], xs[up], d[up], dz[up]
+        tt = (self.CLOUD_H - eye[2]) / dz
+        N = self._cloud_tex.shape[0]
+        gx = ((eye[0] + tt * d[:, 0]) / self.CLOUD_TILE % 1.0) * N
+        gy = ((eye[1] + tt * d[:, 1]) / self.CLOUD_TILE % 1.0) * N
+        x0, y0 = np.floor(gx).astype(int) % N, np.floor(gy).astype(int) % N
+        x1, y1 = (x0 + 1) % N, (y0 + 1) % N
+        fx, fy = gx - np.floor(gx), gy - np.floor(gy)
+        T_ = self._cloud_tex
+        nse = (T_[y0, x0] * (1 - fx) + T_[y0, x1] * fx) * (1 - fy) + (T_[y1, x0] * (1 - fx) + T_[y1, x1] * fx) * fy
+        dens = np.clip((nse - 0.47) / 0.20, 0, 1)
+        dens = dens * dens * (3 - 2 * dens)
+        fade = np.clip((dz - 0.015) / 0.22, 0, 1)  # у горизонта облака тают в дымке
+        a = dens * fade * 0.93
+        base = img[ys, xs]
+        lum = luminance(base)
+        to_sun = -SUN / np.linalg.norm(SUN)
+        glow = 1 + 0.9 * np.clip(d @ to_sun, 0, 1) ** 12  # «серебряная кайма» у солнца
+        bright = float(np.percentile(lum, 70)) * 1.45
+        shade = 1 - 0.55 * dens ** 1.5  # плотные части облака темнее (серое «дно»)
+        cloud = np.array([1.0, 0.985, 0.97])[None] * (bright * glow * shade)[:, None]
+        cloud = cloud * (1 - 0.25 * dens[:, None]) + np.array([0.72, 0.76, 0.84])[None] * bright * 0.25 * dens[:, None] * shade[:, None]
+        img[ys, xs] = base * (1 - a[:, None]) + cloud * a[:, None]
         return img
 
 
@@ -477,10 +633,12 @@ def luminance(img):
     return 0.2126 * img[..., 0] + 0.7152 * img[..., 1] + 0.0722 * img[..., 2]
 
 
-def auto_exposure(img, key=0.20):
-    lum = luminance(img)
-    lg = np.exp(np.mean(np.log(np.clip(lum, 1e-4, None))))
-    return float(np.clip(key / lg, 0.05, 40))
+def auto_exposure(img, key=0.20, hi=0.8):
+    """Экспозиция по среднему логарифму яркости без самых ярких пикселей (окна, экраны, лампы)."""
+    lum = np.clip(luminance(img), 1e-5, None).ravel()
+    cut = np.quantile(lum, hi)
+    lg = np.exp(np.mean(np.log(lum[lum <= cut])))
+    return float(np.clip(key / lg, 0.05, 150))
 
 
 def aces(x):
@@ -492,7 +650,7 @@ def tonemap(img, exposure, bloom=0.06, vignette=0.22):
     from scipy.ndimage import gaussian_filter
     x = img * exposure
     if bloom > 0:
-        br = np.clip(x - 1.2, 0, None)
+        br = np.clip(x - 2.0, 0, None)
         if br.max() > 0:
             g = np.stack([gaussian_filter(br[..., k], sigma=x.shape[1] / 90) for k in range(3)], -1)
             x = x + bloom * g * 4

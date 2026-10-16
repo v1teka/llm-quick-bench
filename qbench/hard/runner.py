@@ -29,7 +29,8 @@ TASKS = {
     "optics": lambda: OpticsTaskHarder(difficulty=3),
     "nav": lambda: NavTaskHard(difficulty=3),
     "cube": lambda: CubeTaskHarder(difficulty=3),
-    "matryoshka": lambda: MatryoshkaTask(difficulty=5),
+    "matryoshka": lambda: MatryoshkaTask(difficulty=5, version=2),
+    "matryoshka1": lambda: MatryoshkaTask(difficulty=5, version=1),  # классические слои (история)
 }
 DEFAULT_TASKS = ("arc", "optics", "nav", "matryoshka")
 DATA = os.path.join(os.path.dirname(__file__), "data")
@@ -37,16 +38,18 @@ DATA = os.path.join(os.path.dirname(__file__), "data")
 
 def task_instance(key, seed):
     """Экземпляры задач фиксированы и кэшируются в qbench/hard/data (генерация сокобана долгая)."""
-    path = os.path.join(DATA, f"{key}_{seed}.json")
+    task = TASKS[key]()
+    path = os.path.join(DATA, f"{getattr(task, 'cache_key', key)}_{seed}.json")
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-    inst = TASKS[key]().generate(seed)
+    inst = task.generate(seed)
     os.makedirs(DATA, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(inst, f, ensure_ascii=False)
     return inst
-TASK_ABILITY = {"arc": "logic", "optics": "simulation", "nav": "plan_search", "cube": "rotation", "matryoshka": "olympiad"}
+TASK_ABILITY = {"arc": "logic", "optics": "simulation", "nav": "plan_search", "cube": "rotation", "matryoshka": "olympiad",
+                "matryoshka1": "olympiad"}
 TASK_SYSTEM = "Ты внимательно решаешь задачи и отвечаешь строго в требуемом формате. " + P.BUDGET
 
 
@@ -157,9 +160,9 @@ class HardRun:
         score, items = task.score(inst, text)
         return {"score": score, "items": items, "overruns": overruns}
 
-    def _run_multi(self, key, task, inst, out):
+    def _run_multi(self, key, task, inst, out, client_name=None):
         """Задача из нескольких сообщений одного диалога (матрёшка: по слою на сообщение)."""
-        client = self.factory(key)
+        client = self.factory(client_name or key)
         msgs = [{"role": "system", "content": TASK_SYSTEM}]
         texts, ov = [], 0
         for j, p in enumerate(task.turns(inst)):
@@ -179,6 +182,37 @@ class HardRun:
                  f"цепочка {items[0]['summary']['chain']}/6)")
         return out
 
+    def _run_oneshot(self, key, task, inst, out):
+        """Матрёшка v2: в счёт — все слои одним ответом (как наборы); диалог по слою на сообщение — диагностика."""
+        msgs = [{"role": "system", "content": TASK_SYSTEM}, {"role": "user", "content": task.prompt(inst)}]
+        text, ov = None, 0
+        try:
+            text = self._ask(self.factory(key), msgs, f"task_{key}")
+            ov = self.last_usage.get("overruns", 0) or 0
+        except NeedResponse as e:
+            self.pending.append(e)
+        diag = None
+        if self.item_diag:
+            d = self._run_multi(key, task, inst, {}, client_name=f"{key}/layers")
+            if d is None:
+                return None
+            diag = {"score": d["res"]["score"], "items": d["res"]["items"], "overruns": d["overruns"], "mode": "layers"}
+        if text is None:
+            return None
+        score, items = task.score(inst, text)
+        answered = bool(text.strip())
+        if not answered:
+            for it in items:
+                it["detail"] = f"нет ответа: лимит вывода исчерпан рассуждениями ({ov} из {ov} попыток)" if ov else "пустой ответ"
+        out.update(res={"score": score, "items": items}, answered=answered, overruns=ov, mode="sets")
+        if diag is not None:
+            out["items_res"] = diag
+        summ = items[0]["summary"]
+        self.log(f"  → {task.title}: {score:.0%} одним ответом (по слоям {summ['by_layer']:.0%}, цепочка {summ['chain']}/6)"
+                 + ("" if answered else " — нет ответа")
+                 + (f"; по слою на сообщение: {diag['score']:.0%}" if diag else ""))
+        return out
+
     def run_task(self, key):
         task = TASKS[key]()
         inst = task_instance(key, self.seed)
@@ -186,7 +220,9 @@ class HardRun:
             json.dump(inst, f, ensure_ascii=False)
         out = {"inst": inst, "title": task.title, "mode": self.puzzles}
         if getattr(task, "multi_turn", False):
-            return self._run_multi(key, task, inst, out)
+            if not getattr(task, "oneshot", False) or self.puzzles == "items":
+                return self._run_multi(key, task, inst, out, client_name=f"{key}/layers" if getattr(task, "oneshot", False) else None)
+            return self._run_oneshot(key, task, inst, out)
         if self.puzzles == "items":
             r = self._ask_items(key, task, inst)
             if r is None:
@@ -237,8 +273,8 @@ class HardRun:
             if key == "self_fix":
                 ab[key] = self_fix_score(first, final) if len(phases) > 1 else None
             elif key in TASK_ABILITY.values():
-                k = next(t for t, a in TASK_ABILITY.items() if a == key)
-                ab[key] = tasks[k]["res"]["score"] if k in tasks else None
+                ks = [t for t, a in TASK_ABILITY.items() if a == key and t in tasks]
+                ab[key] = float(np.mean([tasks[k]["res"]["score"] for k in ks])) if ks else None
             else:
                 cs = [c for c in first if key in c.abilities]
                 ab[key] = weighted(cs) if cs else None
@@ -261,7 +297,8 @@ class HardRun:
             + ", ".join(f"{t['title']} {t['res']['score']:.0%}" + ("" if t.get("answered", True) else " (нет ответа)")
                         for t in tasks.values()),
             *(["По одной головоломке на запрос (диагностика): "
-               + ", ".join(f"{t['title']} {t['items_res']['score']:.0%}" for t in tasks.values() if t.get("items_res"))]
+               + ", ".join((f"{t['title']} по слою на сообщение" if t["items_res"].get("mode") == "layers" else t["title"])
+                           + f" {t['items_res']['score']:.0%}" for t in tasks.values() if t.get("items_res"))]
               if any(t.get("items_res") for t in tasks.values()) else []),
             f"Запросов: {self.usage['calls']}"
             + (f" · токенов вывода: {self.usage['out'] / 1000:.0f} тыс." if self.usage["out"] else "")
@@ -283,9 +320,29 @@ def manual_factory(folder):
     return make
 
 
+PROTOCOL = "v4"  # дом частями · наборы одним ответом · матрёшка v2 одним ответом
+
+
+def protocol_of(d):
+    """Версия протокола Pro по сохранённому run.json (у старых прогонов поля нет)."""
+    if d.get("protocol"):
+        return d["protocol"]
+    t = d.get("tasks", {})
+    if "matryoshka1" in t or "matryoshka" in t:
+        return "v3"  # матрёшка v1, по слою на сообщение
+    return "v2"  # набор «Кубик» вместо матрёшки
+
+
+PROTOCOL_NAMES = {"v2": "наборы ARC, оптика, навигация, кубик", "v3": "матрёшка v1 (классические слои, по слою на сообщение)",
+                  "v4": "матрёшка v2 (IMO 2026 и др., одним ответом)"}
+
+
 def save_summary(s, out_dir):
     data = {k: v for k, v in s.items() if k not in ("phases", "tasks", "checks_groups")}
     data["track"] = "pro"
+    t = s.get("tasks", {})
+    data["protocol"] = PROTOCOL if "matryoshka" in t and t["matryoshka"]["inst"].get("version", 1) >= 2 else \
+        ("v3" if any(k.startswith("matryoshka") for k in t) else "v2")
     data["phases"] = []
     for i, p in enumerate(s["phases"]):
         d = {k: v for k, v in p.items() if k not in ("scene", "checks")}
@@ -321,7 +378,8 @@ def report(s):
             L.append(f"| {'✅' if c.passed else '❌'} | {c.id} {c.name} | {c.score:.0%} | {c.detail.replace('|', '/')} |")
         L.append("")
     for k, t in s["tasks"].items():
-        mode = "набор одним ответом" if t.get("mode") == "sets" else "по одной головоломке на запрос"
+        mode = {"sets": "набор одним ответом", "layers": "диалог, по слою на сообщение"}.get(t.get("mode"),
+                                                                                         "по одной головоломке на запрос")
         L += [f"## {t['title']} — {t['res']['score']:.0%} ({mode})", ""]
         if not t.get("answered", True):
             L += [f"Ответа нет: все попытки ({t.get('overruns', 0)}) исчерпали лимит вывода рассуждениями.", ""]
@@ -331,7 +389,8 @@ def report(s):
         L.append("")
         if t.get("items_res"):
             d = t["items_res"]
-            L += [f"Диагностика — каждая головоломка отдельным запросом: **{d['score']:.0%}** (в счёт не идёт)", "",
+            what = "диалог, по слою на сообщение" if d.get("mode") == "layers" else "каждая головоломка отдельным запросом"
+            L += [f"Диагностика — {what}: **{d['score']:.0%}** (в счёт не идёт)", "",
                   "| | Пункт | Оценка | Детали |", "|---|---|---|---|"]
             for it in d["items"]:
                 L.append(f"| {'✅' if it['ok'] >= 0.999 else ('🟡' if it['ok'] > 0 else '❌')} | {it['label']} | {it['ok']:.0%} | {it['detail'].replace('|', '/')} |")
@@ -358,9 +417,12 @@ class MockHard:
             return as_response(dict(reference_house(), reset=True)), {"in": 0, "out": 0}, 0.0
         key, _, item = phase.replace("task_", "").partition("_")
         inst = task_instance(key, self.seed)
-        if key == "matryoshka":
+        if key.startswith("matryoshka"):
             ch = dict(inst["chain"])
             ch["L2"] += 1  # ошибка в слое 2 для наглядности
+            if not item:  # вся матрёшка одним ответом
+                return json.dumps({**{k: ch[k] for k in ("L5", "L4", "L3", "L2", "L1")}, "L0": {"moves": ch["L0"]}}), \
+                    {"in": 0, "out": 0}, 0.0
             if item == "L0":
                 return json.dumps({"L0": {"moves": ch["L0"]}}), {"in": 0, "out": 0}, 0.0
             return json.dumps({item: ch[item]}), {"in": 0, "out": 0}, 0.0
